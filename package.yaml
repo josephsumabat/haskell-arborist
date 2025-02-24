@@ -1,0 +1,95 @@
+spec-version: 0.30.0
+name: haskell-arborist
+author: Joseph Sumabat
+synopsis: See README on Github for more information 
+description: A personal template for haskell projects
+category: Development
+maintainer: josephrsumabat@gmail.com
+github: josephsumabat/haskell-arborist
+license: MIT
+version: 0.1.0
+build-type: Simple
+extra-source-files:
+  - CHANGELOG.md
+  - README.md
+
+dependencies:
+  - aeson
+  - base
+  - containers >= 0.6.0 && < 0.8
+  - directory
+  - errors
+  - filepath
+  - hashable
+  - haskell-ast
+  - lens
+  - optics
+  - pretty-simple
+  - text == 2.1.2
+  - text-range
+  - tree-sitter-ast
+  - tree-sitter-haskell
+  - tree-sitter-simple
+  - unordered-containers >= 0.2 && < 0.3
+
+
+default-extensions:
+- FlexibleContexts
+- BangPatterns
+- OverloadedRecordDot
+- OverloadedStrings
+- NoFieldSelectors
+- LambdaCase
+- DuplicateRecordFields
+- TypeApplications
+- TypeOperators
+- ImportQualifiedPost
+- PatternSynonyms
+- NamedFieldPuns
+- DeriveGeneric
+- RankNTypes
+- ScopedTypeVariables
+- DataKinds
+- EmptyCase
+
+ghc-options:
+  - -Wall
+  - -Wno-name-shadowing
+  - -Wincomplete-record-updates
+
+library:
+  source-dirs: src
+  ghc-options:
+  - -fwrite-ide-info
+  - -hiedir test/TestData/.hiefiles
+
+executable:
+  source-dirs: app
+  main: Main.hs
+  dependencies:
+  - haskell-arborist
+
+tests:
+  haskell-arborist-test:
+    dependencies:
+    - haskell-arborist
+    defaults: hspec/hspec@main
+    ghc-options:
+      - -fwrite-ide-info
+      - -hiedir test/TestData/.hiefiles
+
+flags:
+  dev:
+    description: Defer type errors for development
+    manual: true
+    default: false
+
+when:
+  - condition: flag(dev)
+    ghc-options:
+    - -fwrite-ide-info
+    - -hiedir .hiefiles
+    - -fdefer-type-errors
+    - -fno-defer-typed-holes
+    - -Werror=deferred-type-errors
+    - -Werror=deferred-out-of-scope-variables
