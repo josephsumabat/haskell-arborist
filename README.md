@@ -1,0 +1,1 @@
+A haskell project template
