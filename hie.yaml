@@ -1,0 +1,13 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:haskell-arborist"
+
+    - path: "./app/Main.hs"
+      component: "haskell-arborist:exe:haskell-arborist"
+
+    - path: "./app/Paths_haskell_arborist.hs"
+      component: "haskell-arborist:exe:haskell-arborist"
+
+    - path: "./test"
+      component: "haskell-arborist:test:haskell-arborist-test"

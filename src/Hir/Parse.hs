@@ -2,6 +2,7 @@
 
 module Hir.Parse where
 
+import TreeSitter.Api
 import AST (DynNode)
 import AST qualified
 import AST.Haskell qualified as H
@@ -18,40 +19,42 @@ import Data.Range (Range)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Hir.Types
+import Data.Either.Extra (eitherToMaybe)
+import Debug.Trace
 
 parseName :: ParseNameTypes -> Name
 parseName ast = case ast of
-  AST.Inj @H.Name _ ->
+  AST.Inj @H.NameP _ ->
     Name
       { node
       , isOperator = False
       , isConstructor = False
       }
-  AST.Inj @H.Constructor _ ->
+  AST.Inj @H.ConstructorP _ ->
     Name
       { node
       , isOperator = False
       , isConstructor = True
       }
-  AST.Inj @H.Variable _ ->
+  AST.Inj @H.VariableP _ ->
     Name
       { node
       , isOperator = False
       , isConstructor = False
       }
-  AST.Inj @H.Operator _ ->
+  AST.Inj @H.OperatorP _ ->
     Name
       { node
       , isOperator = True
       , isConstructor = False
       }
-  AST.Inj @H.FieldName _ ->
+  AST.Inj @H.FieldNameP _ ->
     Name
       { node
       , isOperator = False
       , isConstructor = False
       }
-  AST.Inj @H.ConstructorOperator _ ->
+  AST.Inj @H.ConstructorOperatorP _ ->
     Name
       { node
       , isOperator = True
@@ -61,7 +64,7 @@ parseName ast = case ast of
  where
   node = AST.getDynNode ast
 
-parseNamePrefix :: (H.PrefixId :+ H.PrefixList :+ H.Unit :+ ParseNameTypes) -> AST.Err Name
+parseNamePrefix :: (H.PrefixIdP :+ H.PrefixListP :+ H.UnitP :+ ParseNameTypes) -> AST.Err Name
 parseNamePrefix node =
   case node of
     [AST.x1|prefixId|] -> do
@@ -100,39 +103,39 @@ importQualifier i =
   -- or just `FilePath` without the qualifier
   Maybe.fromMaybe i.mod i.alias
 
-findNode :: (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
+findNode :: Show b => (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
 findNode f n = go n
  where
   go n = f n <|> asum (go <$> (AST.nodeChildren n))
 
-parseImportName :: H.ImportName -> AST.Err ImportName
+parseImportName :: H.ImportNameP -> AST.Err ImportName
 parseImportName name = do
   let text = AST.nodeToText name
   pure $ ImportName {name = text}
 
-parseNameSpace :: H.Namespace -> AST.Err NameSpace
+parseNameSpace :: H.NamespaceP -> AST.Err NameSpace
 parseNameSpace n = case n.dynNode.nodeText of
   "data" -> pure NameSpaceValue
   "type" -> pure NameSpaceType
   "pattern" -> pure NameSpacePattern
   _ -> Left $ "could not parse namespace: " <> T.pack (show n)
 
-parseImportOperator :: H.PrefixId -> AST.Err Name
+parseImportOperator :: H.PrefixIdP -> AST.Err Name
 parseImportOperator operator = do
   operator <- operator.children
   parseName <$> removeQualified operator
 
-parseExportOperator :: H.PrefixId -> AST.Err Qualified
+parseExportOperator :: H.PrefixIdP -> AST.Err Qualified
 parseExportOperator operator = do
   operator <- operator.children
   parseQualified $ AST.subset operator
 
-removeQualified :: forall n n'. (AST.Subset n (H.Qualified :+ n')) => n -> AST.Err n'
-removeQualified n = case AST.subset @_ @(H.Qualified :+ n') n of
+removeQualified :: forall n n'. (AST.Subset n (H.QualifiedP :+ n')) => n -> AST.Err n'
+removeQualified n = case AST.subset @_ @(H.QualifiedP :+ n') n of
   AST.X qualified -> Left $ "qualified name in import: " <> qualified.dynNode.nodeText
   AST.Rest name -> pure name
 
-type ParseImportChildren = H.Qualified :+ H.AllNames :+ H.AssociatedType :+ H.PrefixId :+ ParseNameTypes
+type ParseImportChildren = H.QualifiedP :+ H.AllNamesP :+ H.AssociatedTypeP :+ H.PrefixIdP :+ ParseNameTypes
 
 parseImportChild :: ParseImportChildren -> AST.Err ImportChildren
 parseImportChild child = case child of
@@ -166,14 +169,14 @@ parseExportChild child = case child of
     name <- parseQualified (AST.subset rest)
     pure $ ExportChild NameSpaceValue name
 
-parseImportChildren :: H.Children -> AST.Err [ImportChildren]
+parseImportChildren :: H.ChildrenP -> AST.Err [ImportChildren]
 parseImportChildren children = do
   element <- AST.collapseErr children.element
   let children = AST.subset @_ @ParseImportChildren <$> element
   children <- traverse parseImportChild children
   pure children
 
-parseImportItem :: H.ImportName -> AST.Err ImportItem
+parseImportItem :: H.ImportNameP -> AST.Err ImportItem
 parseImportItem i = do
   namespace <- traverse parseNameSpace =<< AST.collapseErr i.namespace
   namespace <- pure $ Maybe.fromMaybe NameSpaceValue namespace
@@ -193,14 +196,14 @@ parseImportItem i = do
       , children
       }
 
-parseExportChildren :: H.Children -> AST.Err [ExportChildren]
+parseExportChildren :: H.ChildrenP -> AST.Err [ExportChildren]
 parseExportChildren children = do
   element <- AST.collapseErr children.element
   let children = AST.subset @_ @ParseImportChildren <$> element
   children <- traverse parseExportChild children
   pure children
 
-parseExportItem :: H.Export -> AST.Err ExportItem
+parseExportItem :: H.ExportP -> AST.Err ExportItem
 parseExportItem e = do
   e <- AST.unwrap e
   namespace <- traverse parseNameSpace e.namespace
@@ -220,12 +223,12 @@ parseExportItem e = do
       , name
       , children
       }
-parseModuleExportItem :: H.ModuleExport -> AST.Err ExportItem
+parseModuleExportItem :: H.ModuleExportP -> AST.Err ExportItem
 parseModuleExportItem e = do
   module' <- parseModuleName =<< e.module'
   pure $ ExportModuleItem module'
 
-parseExportList :: H.Exports -> AST.Err [ExportItem]
+parseExportList :: H.ExportsP -> AST.Err [ExportItem]
 parseExportList exports = do
   export <- AST.collapseErr exports.export
   moduleExports <- AST.collapseErr exports.children
@@ -233,13 +236,13 @@ parseExportList exports = do
   moduleExports <- traverse parseModuleExportItem moduleExports
   pure $ normalExports ++ moduleExports
 
-parseImportList :: H.ImportList -> AST.Err [ImportItem]
+parseImportList :: H.ImportListP -> AST.Err [ImportItem]
 parseImportList i = do
   name <- AST.collapseErr i.name
   items <- traverse parseImportItem name
   pure items
 
-parseModuleText :: H.Module -> AST.Err ModuleText
+parseModuleText :: H.ModuleP -> AST.Err ModuleText
 parseModuleText m = do
   ids <- AST.collapseErr m.children
   pure $
@@ -250,12 +253,12 @@ parseModuleText m = do
       , parts = fmap AST.nodeToText ids
       }
 
-parseModuleName :: H.Module -> AST.Err ModuleName
+parseModuleName :: H.ModuleP -> AST.Err ModuleName
 parseModuleName m = do
   mod <- parseModuleText m
   pure $ ModuleName {mod, node = m}
 
-parseImport :: H.Import -> AST.Err Import
+parseImport :: H.ImportP -> AST.Err Import
 parseImport i = do
   mod <- i.module'
   mod <- parseModuleText mod
@@ -289,9 +292,9 @@ parseQualified q = do
       let name = parseName q
       pure $ Qualified {mod = Nothing, name}
 
-getQualifiedAtPoint :: Range -> H.Haskell -> AST.Err (Maybe Qualified)
+getQualifiedAtPoint :: Range -> H.HaskellP -> AST.Err (Maybe Qualified)
 getQualifiedAtPoint range h = do
-  let node = AST.getDeepestContaining @H.Qualified range (AST.getDynNode h)
+  let node = AST.getDeepestContaining @H.QualifiedP range (AST.getDynNode h)
   case node of
     Nothing ->
       traverse
@@ -299,7 +302,7 @@ getQualifiedAtPoint range h = do
         (AST.getDeepestContaining @ParseQualifiedTypes range h.dynNode)
     Just node -> Just <$> parseQualified (AST.Inj node)
 
-parseImports :: H.Imports -> AST.Err ([Text], [Import])
+parseImports :: H.ImportsP -> AST.Err ([Text], [Import])
 parseImports i = do
   import' <- i.import'
   let (es, imports) = Either.partitionEithers (NE.toList import')
@@ -307,14 +310,14 @@ parseImports i = do
   let (es', imports') = Either.partitionEithers imports
   pure (es ++ es', imports')
 
-parseDataType :: H.DataType -> AST.Err DataDecl
+parseDataType :: H.DataTypeP -> AST.Err DataDecl
 parseDataType node = do
   dt <- AST.unwrap node
   name <- Error.note "no name for data type" dt.name
   name <- parseNamePrefix =<< removeQualified name
   pure DataDecl {name, node}
 
-parseBind :: H.Decl -> AST.Err (Decl)
+parseBind :: H.DeclP -> AST.Err Decl
 parseBind decl = do
   case decl.getDecl of
     [AST.x1|bindNode|] -> do
@@ -334,44 +337,44 @@ parseBind decl = do
       pure $ DeclSig SigDecl {name, node = sigNode}
     [AST.rest3|nil|] -> case nil of {}
 
-parseClass :: H.Class -> AST.Err (Decl)
+parseClass :: H.ClassP -> AST.Err Decl
 parseClass c = do
   cu <- AST.unwrap c
   name <- note "no name for class" cu.name
   name <- parseNamePrefix $ AST.subset name
   pure $ DeclClass ClassDecl {name, node = c}
 
-parseDataFamily :: H.DataFamily -> AST.Err (Decl)
+parseDataFamily :: H.DataFamilyP -> AST.Err Decl
 parseDataFamily d = do
   du <- AST.unwrap d
   name <- note "no name for data family" du.name
   name <- parseNamePrefix $ AST.subset name
   pure $ DeclDataFamily DataFamilyDecl {name, node = d}
 
-parseNewtype :: H.Newtype -> AST.Err (Decl)
+parseNewtype :: H.NewtypeP -> AST.Err Decl
 parseNewtype n = do
   nu <- AST.unwrap n
   name <- note "no name for newtype" nu.name
   name <- parseNamePrefix =<< removeQualified name
   pure $ DeclNewtype NewtypeDecl {name, node = n}
 
-parseBindingList :: H.BindingList -> AST.Err [Name]
+parseBindingList :: H.BindingListP -> AST.Err [Name]
 parseBindingList bs = do
   bsu <- AST.unwrap bs
   let names = NE.toList bsu.name
   traverse (parseNamePrefix . AST.subset) names
 
-parsePattern :: H.PatternSynonym -> AST.Err ([Decl])
+parsePattern :: H.PatternSynonymP -> AST.Err [Decl]
 parsePattern p = do
   p <- p.children
   case p of
-    AST.Inj @H.Equation e -> do
+    AST.Inj @H.EquationP e -> do
       eu <- AST.unwrap e
       synonym <- note "no synonym" eu.synonym
       res <- note "no name found" $ AST.getDeepestSatisfying (AST.cast @ParseNameTypes) (AST.getDynNode synonym)
       let name = parseName res
       pure [DeclPattern PatternDecl {name, node = e}]
-    AST.Inj @H.Signature s -> do
+    AST.Inj @H.SignatureP s -> do
       su <- AST.unwrap s
       case su.names of
         Just bindingList -> do
@@ -388,54 +391,59 @@ parsePattern p = do
               pure [DeclPatternSig PatternSigDecl {name, node = s}]
     _ -> pure []
 
-parseTypeFamily :: H.TypeFamily -> AST.Err (Decl)
+parseTypeFamily :: H.TypeFamilyP -> AST.Err Decl
 parseTypeFamily t = do
   tu <- AST.unwrap t
   name <- note "no name for type family" tu.name
   name <- parseNamePrefix =<< removeQualified name
   pure $ DeclTypeFamily TypeFamilyDecl {name, node = t}
 
-parseTypeSynonym :: H.TypeSynomym -> AST.Err (Decl)
+parseTypeSynonym :: H.TypeSynomymP -> AST.Err Decl
 parseTypeSynonym t = do
   tu <- AST.unwrap t
   name <- note "no name for type synonym" tu.name
   name <- parseNamePrefix =<< removeQualified name
   pure $ DeclTypeSynonym TypeSynonymDecl {name, node = t}
 
-parseDeclaration :: H.Declaration -> AST.Err ([Decl])
+parseDeclaration :: H.DeclarationP -> AST.Err [Decl]
 parseDeclaration decl = case decl.getDeclaration of
-  AST.Inj @H.DataType d -> do
-    (pure @[] . DeclData) <$> parseDataType d
-  AST.Inj @H.Decl b -> pure @[] <$> parseBind b
-  AST.Inj @H.Class c -> pure @[] <$> parseClass c
-  AST.Inj @H.DataFamily d -> pure @[] <$> parseDataFamily d
-  AST.Inj @H.Newtype n -> pure @[] <$> parseNewtype n
-  AST.Inj @H.PatternSynonym p -> parsePattern p
-  AST.Inj @H.TypeFamily t -> pure @[] <$> parseTypeFamily t
-  AST.Inj @H.TypeSynomym t -> pure @[] <$> parseTypeSynonym t
+  AST.Inj @H.DataTypeP d -> do
+    pure @[] . DeclData <$> parseDataType d
+  AST.Inj @H.DeclP b -> pure @[] <$> parseBind b
+  AST.Inj @H.ClassP c -> pure @[] <$> parseClass c
+  AST.Inj @H.DataFamilyP d -> pure @[] <$> parseDataFamily d
+  AST.Inj @H.NewtypeP n -> pure @[] <$> parseNewtype n
+  AST.Inj @H.PatternSynonymP p -> parsePattern p
+  AST.Inj @H.TypeFamilyP t -> pure @[] <$> parseTypeFamily t
+  AST.Inj @H.TypeSynomymP t -> pure @[] <$> parseTypeSynonym t
   _ -> pure []
 
 emptyProgram :: Program
 emptyProgram =
   Program
     { imports = []
-    , exports = []
+    , exports = Nothing
     , decls = []
+    , mod = Nothing 
+    , dynNode = AST.defaultNode
     }
 
-parseHaskell :: H.Haskell -> ([Text], Program)
+parseHaskell :: H.HaskellP -> ([Text], Program)
 parseHaskell h = do
   let res = do
         let imports = Maybe.fromMaybe Nothing $ Error.hush $ AST.collapseErr h.imports
+        let mod = findNode (AST.cast @H.HeaderP) (AST.getDynNode h) >>=
+                  eitherToMaybe  . (.module') >>=
+                    eitherToMaybe . parseModuleText
         (es, imports) <- case imports of
           Nothing -> pure ([], [])
           Just imports -> parseImports imports
         header <- AST.collapseErr h.children
         (es', exports) <- case header of
-          Nothing -> pure (es, [])
+          Nothing -> pure (es, Nothing)
           Just header -> do
             let exports = Maybe.fromMaybe Nothing $ Error.hush $ AST.collapseErr header.exports
-            let exports' = Maybe.fromMaybe [] $ Maybe.fromMaybe Nothing $ Error.hush $ traverse parseExportList exports
+            let exports' = Maybe.fromMaybe Nothing $ Error.hush $ traverse parseExportList exports
             pure (es, exports')
         (es'', decls) <- do
           let decls = Maybe.fromMaybe Nothing $ Error.hush $ AST.collapseErr h.declarations
@@ -444,7 +452,7 @@ parseHaskell h = do
             Just decls -> do
               -- let children =
               let children = Maybe.fromMaybe [] $ fmap NE.toList $ Error.hush $ AST.collapseErr decls.children
-              let parseChild (child :: H.Declaration :+ H.Import :+ AST.Nil) = do
+              let parseChild (child :: H.DeclarationP :+ H.ImportP :+ AST.Nil) = do
                     case child of
                       AST.X decl -> do
                         decl <- parseDeclaration decl
@@ -456,15 +464,15 @@ parseHaskell h = do
               let (es, decls') = Either.partitionEithers decls
               let decls'' = concat decls'
               pure (es, decls'')
-        pure (es ++ es' ++ es'', Program {imports, exports, decls})
+        pure (es ++ es' ++ es'', Program {imports, exports, decls, mod, dynNode = h.dynNode})
   case res of
     Right (es, program) -> (es, program)
     Left e -> ([e], emptyProgram)
 
-getNameTypes :: Range -> H.Haskell -> Maybe GetNameTypes
+getNameTypes :: Range -> H.HaskellP -> Maybe GetNameTypes
 getNameTypes range hs = AST.getDeepestContaining @GetNameTypes range hs.dynNode
 
-parseThQuotedName :: H.ThQuotedName -> AST.Err ThQuotedName
+parseThQuotedName :: H.ThQuotedNameP -> AST.Err ThQuotedName
 parseThQuotedName thQuotedName = do
   name <- AST.collapseErr thQuotedName.name
   type' <- AST.collapseErr thQuotedName.type'
@@ -473,33 +481,33 @@ parseThQuotedName thQuotedName = do
     Just text -> pure text
     Nothing -> Left "ThQuotedName must have either a name or a type"
 
-getPersistentModelAtPoint :: Range -> H.Haskell -> Maybe Text
+getPersistentModelAtPoint :: Range -> H.HaskellP -> Maybe Text
 getPersistentModelAtPoint range hs = do
-  splice <- AST.getDeepestContaining @H.TopSplice range hs.dynNode
+  splice <- AST.getDeepestContaining @H.TopSpliceP range hs.dynNode
   _ <- AST.getDeepestSatisfying getMkModelApply splice.dynNode
   modelFileArg <- AST.getDeepestSatisfying getModelFileApply splice.dynNode
-  (AST.Inj @H.Literal modelFileLit) <- pure modelFileArg.getExpression
+  (AST.Inj @H.LiteralP modelFileLit) <- pure modelFileArg.getExpression
   modelFileLit <- hush $ AST.unwrap modelFileLit
-  (AST.Inj @H.String modelFileStr) <- pure modelFileLit.children
+  (AST.Inj @H.StringP modelFileStr) <- pure modelFileLit.children
   let persistentModelName = modelFileStr.dynNode.nodeText
   persistentModelName <- T.stripPrefix "\"" persistentModelName
   persistentModelName <- T.stripSuffix "\"" persistentModelName
   pure persistentModelName
  where
-  getMkModelApply :: DynNode -> Maybe H.Expression
+  getMkModelApply :: DynNode -> Maybe H.ExpressionP
   getMkModelApply = getApplyVarWithName "mkModel"
 
-  getModelFileApply :: DynNode -> Maybe H.Expression
+  getModelFileApply :: DynNode -> Maybe H.ExpressionP
   getModelFileApply = getApplyVarWithName "modelFile"
 
-  getApplyVarWithName :: Text -> DynNode -> Maybe H.Expression
+  getApplyVarWithName :: Text -> DynNode -> Maybe H.ExpressionP
   getApplyVarWithName name node = do
-    apply <- AST.cast @H.Apply node
+    apply <- AST.cast @H.ApplyP node
     apply <- hush $ AST.unwrap apply
     fun <- apply.function
-    (AST.Inj @H.Expression funExpr) <- pure fun
-    (AST.Inj @H.Variable funVar) <- pure funExpr.getExpression
+    (AST.Inj @H.ExpressionP funExpr) <- pure fun
+    (AST.Inj @H.VariableP funVar) <- pure funExpr.getExpression
     let funText = funVar.dynNode.nodeText
     guard $ funText == name
-    (AST.Inj @H.Expression argExpr) <- pure apply.argument
+    (AST.Inj @H.ExpressionP argExpr) <- pure apply.argument
     pure argExpr
