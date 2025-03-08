@@ -20,7 +20,7 @@ data NameSpace
 
 instance Hashable NameSpace
 
-type ThSplice = Haskell.TopSplice :+ Haskell.Splice
+type ThSplice = Haskell.TopSpliceP :+ Haskell.SpliceP
 
 data Name = Name
   { node :: !DynNode
@@ -62,7 +62,7 @@ instance Hashable ModuleText where
 
 data ModuleName = ModuleName
   { mod :: ModuleText
-  , node :: H.Module
+  , node :: H.ModuleP
   }
   deriving (Show)
 
@@ -120,71 +120,71 @@ pattern OpenImport :: ModuleText -> Import
 pattern OpenImport mod = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = []}
 
 type ParseNameTypes =
-  Haskell.Name
-    :+ Haskell.Constructor
-    :+ Haskell.Variable
-    :+ Haskell.Operator
-    :+ Haskell.FieldName
-    :+ Haskell.ConstructorOperator
+  Haskell.NameP
+    :+ Haskell.ConstructorP
+    :+ Haskell.VariableP
+    :+ Haskell.OperatorP
+    :+ Haskell.FieldNameP
+    :+ Haskell.ConstructorOperatorP
     :+ Nil
 
-type ParseQualifiedTypes = H.Qualified :+ ParseNameTypes
+type ParseQualifiedTypes = H.QualifiedP :+ ParseNameTypes
 
 data DataDecl = DataDecl
   { name :: Name
-  , node :: H.DataType
+  , node :: H.DataTypeP
   }
   deriving (Show)
 
 data ClassDecl = ClassDecl
   { name :: Name
-  , node :: H.Class
+  , node :: H.ClassP
   }
   deriving (Show)
 
 data BindDecl = BindDecl
   { name :: Name
-  , node :: H.Bind :+ H.Function :+ AST.Nil
+  , node :: H.BindP :+ H.FunctionP :+ AST.Nil
   }
   deriving (Show)
 
 data SigDecl = SigDecl
   { name :: Name
-  , node :: H.Signature
+  , node :: H.SignatureP
   }
   deriving (Show)
 
 data DataFamilyDecl = DataFamilyDecl
-  {name :: Name, node :: H.DataFamily}
+  {name :: Name, node :: H.DataFamilyP}
   deriving (Show)
 
 data NewtypeDecl = NewtypeDecl
   { name :: Name
-  , node :: H.Newtype
+  , node :: H.NewtypeP
   }
   deriving (Show)
 
 data PatternSigDecl = PatternSigDecl
   { name :: Name
-  , node :: H.Signature
+  , node :: H.SignatureP
   }
   deriving (Show)
 
 data PatternDecl = PatternDecl
   { name :: Name
-  , node :: H.Equation
+  , node :: H.EquationP
   }
   deriving (Show)
 
 data TypeFamilyDecl = TypeFamilyDecl
   { name :: Name
-  , node :: H.TypeFamily
+  , node :: H.TypeFamilyP
   }
   deriving (Show)
 
 data TypeSynonymDecl = TypeSynonymDecl
   { name :: Name
-  , node :: H.TypeSynomym
+  , node :: H.TypeSynomymP
   }
   deriving (Show)
 
@@ -202,19 +202,21 @@ data Decl
   deriving (Show)
 
 data Program = Program
-  { imports :: [Import]
-  , exports :: [ExportItem]
+  { mod :: Maybe ModuleText
+  , imports :: [Import]
+  , exports :: Maybe [ExportItem]
   , decls :: [Decl]
+  , dynNode :: DynNode
   }
   deriving (Show)
 
 type GetNameTypes =
-  Haskell.Name
-    :+ Haskell.Constructor
-    :+ Haskell.Variable
-    :+ Haskell.Operator
-    :+ Haskell.FieldName
-    :+ Haskell.ConstructorOperator
+  Haskell.NameP
+    :+ Haskell.ConstructorP
+    :+ Haskell.VariableP
+    :+ Haskell.OperatorP
+    :+ Haskell.FieldNameP
+    :+ Haskell.ConstructorOperatorP
     :+ Nil
 
 data ThQuotedName = ThQuotedName

@@ -17,8 +17,12 @@ dependencies:
   - aeson
   - base
   - containers >= 0.6.0 && < 0.8
+  - criterion
+  - deepseq
   - directory
   - errors
+  - exceptions
+  - extra
   - filepath
   - hashable
   - haskell-ast
@@ -30,6 +34,8 @@ dependencies:
   - tree-sitter-ast
   - tree-sitter-haskell
   - tree-sitter-simple
+  - unliftio
+  - time
   - unordered-containers >= 0.2 && < 0.3
 
 
@@ -83,6 +89,10 @@ flags:
     description: Defer type errors for development
     manual: true
     default: false
+  par:
+    description: Run with parallelism
+    manual: true
+    default: false
 
 when:
   - condition: flag(dev)
@@ -93,3 +103,5 @@ when:
     - -fno-defer-typed-holes
     - -Werror=deferred-type-errors
     - -Werror=deferred-out-of-scope-variables
+  - condition: flag(par)
+    ghc-options: -O2 -threaded -rtsopts
