@@ -29,12 +29,23 @@ flag dev
   manual: True
   default: False
 
+flag par
+  description: Run with parallelism
+  manual: True
+  default: False
+
 library
   exposed-modules:
+      Arborist.Renamer
+      Arborist.Renamer.GlobalEnv
+      Data.Path
       HaskellAnalyzer
+      Hir
       Hir.Parse
+      Hir.Print
       Hir.Types
       ModContext
+      ModUtils
   other-modules:
       Paths_haskell_arborist
   hs-source-dirs:
@@ -62,8 +73,12 @@ library
       aeson
     , base
     , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
     , directory
     , errors
+    , exceptions
+    , extra
     , filepath
     , hashable
     , haskell-ast
@@ -72,13 +87,17 @@ library
     , pretty-simple
     , text ==2.1.2
     , text-range
+    , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
+    , unliftio
     , unordered-containers ==0.2.*
   default-language: Haskell2010
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
 
 executable haskell-arborist
   main-is: Main.hs
@@ -109,8 +128,12 @@ executable haskell-arborist
       aeson
     , base
     , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
     , directory
     , errors
+    , exceptions
+    , extra
     , filepath
     , hashable
     , haskell-arborist
@@ -120,13 +143,17 @@ executable haskell-arborist
     , pretty-simple
     , text ==2.1.2
     , text-range
+    , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
+    , unliftio
     , unordered-containers ==0.2.*
   default-language: Haskell2010
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
 
 test-suite haskell-arborist-test
   type: exitcode-stdio-1.0
@@ -158,8 +185,12 @@ test-suite haskell-arborist-test
       aeson
     , base
     , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
     , directory
     , errors
+    , exceptions
+    , extra
     , filepath
     , hashable
     , haskell-arborist
@@ -170,11 +201,15 @@ test-suite haskell-arborist-test
     , pretty-simple
     , text ==2.1.2
     , text-range
+    , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
+    , unliftio
     , unordered-containers ==0.2.*
   default-language: Haskell2010
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
   build-tool-depends: hspec-discover:hspec-discover == 2.*
