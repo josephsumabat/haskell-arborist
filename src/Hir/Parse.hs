@@ -21,6 +21,8 @@ import Data.Text qualified as T
 import Hir.Types
 import Data.Either.Extra (eitherToMaybe)
 import Debug.Trace
+import Hir
+
 
 parseName :: ParseNameTypes -> Name
 parseName ast = case ast of
@@ -364,8 +366,30 @@ parseBindingList bs = do
   let names = NE.toList bsu.name
   traverse (parseNamePrefix . AST.subset) names
 
-parsePattern :: H.PatternSynonymP -> AST.Err [Decl]
-parsePattern p = do
+parsePattern :: H.PatternP -> AST.Err Pattern
+parsePattern pat = case pat.getPattern of
+  [AST.x1|wildcard|] -> pure PatWildcard
+  [AST.x2|variable|] -> do
+    variable <- AST.unwrap variable
+    let name = parseName (AST.Inj variable)
+    pure $ PatVariable name
+  [AST.x3|constructor|] -> do
+    constructor <- AST.unwrap constructor
+    let name = parseName (AST.Inj constructor)
+    pure $ PatConstructor name []
+  [AST.x4|list|] -> do
+    list <- AST.unwrap list
+    elements <- traverse parsePattern =<< AST.collapseErr list.element
+    pure $ PatList elements
+  [AST.x5|tuple|] -> do
+    tuple <- AST.unwrap tuple
+    elements <- traverse parsePattern =<< AST.collapseErr tuple.element
+    pure $ PatTuple elements
+  [AST.rest5|nil|] -> case nil of {}
+
+
+parsePatternDecl :: H.PatternSynonymP -> AST.Err [Decl]
+parsePatternDecl p = do
   p <- p.children
   case p of
     AST.Inj @H.EquationP e -> do
@@ -413,7 +437,7 @@ parseDeclaration decl = case decl.getDeclaration of
   AST.Inj @H.ClassP c -> pure @[] <$> parseClass c
   AST.Inj @H.DataFamilyP d -> pure @[] <$> parseDataFamily d
   AST.Inj @H.NewtypeP n -> pure @[] <$> parseNewtype n
-  AST.Inj @H.PatternSynonymP p -> parsePattern p
+  AST.Inj @H.PatternSynonymP p -> parsePatternDecl p
   AST.Inj @H.TypeFamilyP t -> pure @[] <$> parseTypeFamily t
   AST.Inj @H.TypeSynomymP t -> pure @[] <$> parseTypeSynonym t
   _ -> pure []
@@ -425,6 +449,7 @@ emptyProgram =
     , exports = []
     , decls = []
     , mod = Nothing 
+    , dynNode = AST.defaultNode
     }
 
 parseHaskell :: H.HaskellP -> ([Text], Program)
@@ -463,7 +488,7 @@ parseHaskell h = do
               let (es, decls') = Either.partitionEithers decls
               let decls'' = concat decls'
               pure (es, decls'')
-        pure (es ++ es' ++ es'', Program {imports, exports, decls, mod, haskell = h})
+        pure (es ++ es' ++ es'', Program {imports, exports, decls, mod, dynNode = h.dynNode})
   case res of
     Right (es, program) -> (es, program)
     Left e -> ([e], emptyProgram)
@@ -510,3 +535,166 @@ getPersistentModelAtPoint range hs = do
     guard $ funText == name
     (AST.Inj @H.ExpressionP argExpr) <- pure apply.argument
     pure argExpr
+
+parseExpression :: H.ExpressionP -> AST.Err Expression
+parseExpression expr = case expr.getExpression of
+  AST.Inj @H.ApplyP apply -> do
+    function <- parseExpression =<< AST.unwrap apply.function
+    argument <- parseExpression (AST.subset apply.argument)
+    pure $ ExprApplication function [argument]
+  AST.Inj @H.VariableP variable ->
+    pure $ ExprVariable (parseName (AST.Inj variable))
+  AST.Inj @H.ConstructorP constructor ->
+    pure $ ExprConstructor (parseName (AST.Inj constructor))
+  AST.Inj @H.LiteralP literal -> do
+    lit <- parseLiteral (AST.subset literal.children)
+    pure $ ExprLiteral lit
+  AST.Inj @H.MultiWayIfP conditional -> do
+    condition <- parseExpression (AST.subset conditional.if')
+    thenBranch <- parseExpression (AST.subset conditional.then')
+    elseBranch <- parseExpression (AST.subset conditional.else')
+    pure $ ExprIf condition thenBranch elseBranch
+  AST.Inj @H.CaseP caseExpr -> do
+    expr <- parseExpression (AST.subset caseExpr.children)
+    alternatives <- AST.collapseErr =<< AST.unwrap caseExpr.alternatives
+    alts <- traverse parseCaseAlternative =<< AST.collapseErr alternatives.alternative
+    pure $ ExprCase expr alts
+  AST.Inj @H.LambdaP lambda -> do
+    patterns <- AST.unwrap lambda.patterns
+    let patList = NE.toList patterns.children
+    params <- traverse parsePattern patList
+    body <- parseExpression (AST.subset lambda.expression)
+    pure $ ExprLambda (NE.fromList (patternNames =<< params)) body
+  AST.Inj @H.LetInP letIn -> do
+    binds <- AST.collapseErr =<< AST.unwrap letIn.binds
+    decls <- traverse parseBind =<< AST.collapseErr binds.decl
+    expr <- parseExpression (AST.subset letIn.expression)
+    pure $ ExprLet decls expr
+  AST.Inj @H.TupleP tuple -> do
+    elements <- AST.collapseErr tuple.element
+    exprElements <- traverse (parseExpression . AST.subset) elements
+    pure $ ExprTuple exprElements
+  AST.Inj @H.ListP list -> do
+    elements <- AST.collapseErr list.element
+    exprElements <- traverse (parseExpression . AST.subset) elements
+    pure $ ExprList exprElements
+  AST.Inj @H.DoP doExpr -> do
+    statements <- traverse parseStatement =<< AST.collapseErr doExpr.statement
+    pure $ ExprDo statements
+  AST.Inj @H.LeftSectionP section -> do
+    leftOperand <- parseExpression (AST.subset section.leftOperand)
+    operator <- parseName <$> AST.unwrap section.operator
+    pure $ ExprSectionLeft leftOperand operator
+  AST.Inj @H.RightSectionP section -> do
+    operator <- parseName <$> AST.unwrap section.children
+    rightOperand <- parseExpression (AST.subset section.rightOperand)
+    pure $ ExprSectionRight operator rightOperand
+  AST.Inj @H.NegationP negation -> do
+    expr <- parseExpression (AST.subset negation.expression)
+    pure $ ExprNegate expr
+  AST.Inj @H.ExplicitTypeP typed -> do
+    expr <- parseExpression (AST.subset typed.expression)
+    typeExpr <- parseType (AST.subset typed.type')
+    pure $ ExprTyped expr typeExpr
+  AST.Inj @H.SpliceP splice -> do
+    let name = parseName (AST.subset splice.expression)
+    pure $ ExprSplice name
+  AST.Inj @H.QuasiquoteP qq -> do
+    let name = parseName (AST.subset qq.quoter)
+    body <- parseExpression (AST.subset qq.body)
+    pure $ ExprQuasiquote name body
+  _ -> Left "parseExpression: non-exhaustive case"
+
+parseCaseAlternative :: H.AlternativeP -> AST.Err (Pattern, Expression)
+parseCaseAlternative alt = do
+  alt <- AST.unwrap alt
+  patternNode <- AST.unwrap =<< Error.note "no pattern in case alternative" alt.pattern'
+  expr <- parseExpression (AST.subset alt.match)
+  pat <- parsePattern (AST.subset patternNode)
+  pure (pat, expr)
+
+parseType :: H.TypeP -> AST.Err Type
+parseType ty = case ty.getType of
+  [AST.x1|variableNode|] -> do
+    variable <- AST.unwrap variableNode
+    let name = parseName (AST.Inj variable)
+    pure $ TypeVariable name
+  [AST.x2|constructorNode|] -> do
+    constructor <- AST.unwrap constructorNode
+    let name = parseName (AST.Inj constructor)
+    pure $ TypeConstructor name
+  [AST.x3|applyNode|] -> do
+    apply <- AST.unwrap applyNode
+    typeFunc <- parseType (AST.subset apply.function)
+    typeArg <- parseType (AST.subset apply.argument)
+    pure $ TypeApplication typeFunc [typeArg]
+  [AST.x4|tupleNode|] -> do
+    tuple <- AST.unwrap tupleNode
+    elements <- traverse parseType =<< AST.collapseErr tuple.element
+    pure $ TypeTuple elements
+  [AST.x5|listNode|] -> do
+    list <- AST.unwrap listNode
+    innerType <- parseType (AST.subset list.children)
+    pure $ TypeList innerType
+  [AST.x6|arrowNode|] -> do
+    arrow <- AST.unwrap arrowNode
+    param <- parseType (AST.subset arrow.parameter)
+    result <- parseType (AST.subset arrow.result)
+    pure $ TypeArrow param result
+  [AST.rest6|nil|] -> case nil of {}
+
+parseStatement :: H.StatementP -> AST.Err Statement
+parseStatement stmt = case stmt.getStatement of
+  [AST.x1|bindNode|] -> do
+    bind <- AST.unwrap bindNode
+    patternNode <- AST.unwrap =<< Error.note "no pattern in statement" bind.pattern'
+    expr <- parseExpression (AST.subset bind.expression)
+    pat <- parsePattern (AST.subset patternNode)
+    pure $ StmtBind (patternNames pat) expr
+  [AST.x2|expressionNode|] -> do
+    expr <- parseExpression (AST.subset expressionNode)
+    pure $ StmtExpression expr
+  [AST.x3|letNode|] -> do
+    letStmt <- AST.unwrap letNode
+    binds <- AST.unwrap =<< Error.note "no bindings in let statement" letStmt.binds
+    decls <- parseBind binds.decl
+    pure $ StmtLet decls
+  [AST.x4|recNode|] -> do
+    recBlock <- AST.unwrap recNode
+    statements <- traverse parseStatement recBlock.statement
+    pure $ StmtRec statements
+  [AST.rest4|nil|] -> case nil of {}
+
+parseLocalBinds :: H.LocalBindsP -> AST.Err [Decl]
+parseLocalBinds binds = do
+  decls <- AST.collapseErr binds.decl
+  let parsedDecls = fmap (AST.subset @_ @(H.DeclP :+ H.FixityP)) decls
+  traverse parseDeclOrFixity parsedDecls
+
+parseDeclOrFixity :: H.DeclP :+ H.FixityP -> AST.Err Decl
+parseDeclOrFixity node = case node of
+  AST.X decl -> parseBind decl
+  AST.Rest fixity -> Left "fixity"
+
+--parseFixity :: H.FixityP -> AST.Err Decl
+--parseFixity fixity = do
+--  fixityNode <- AST.unwrap fixity
+--  let name = AST.nodeToText fixityNode.dynNode  -- Extract the fixity name
+--  pure $ DeclFixity dynNode
+
+parseLiteral :: (H.CharP :+ H.FloatP :+ H.IntegerP :+ H.StringP :+ AST.Nil) -> AST.Err Literal
+parseLiteral lit = case lit of
+  [AST.x1|charNode|] -> do
+    pure $ LitChar (AST.nodeToText charNode.dynNode)
+  [AST.x2|floatNode|] -> do
+    pure $ LitFloat (AST.nodeToText floatNode.dynNode)
+  [AST.x3|integerNode|] -> do
+    pure $ LitInt (AST.nodeToText integerNode.dynNode)
+  [AST.x4|stringNode|] -> do
+    pure $ LitString (AST.nodeToText stringNode.dynNode)
+  [AST.rest4|nil|] -> case nil of {}
+
+--parseDeclarations :: H.DeclarationsP -> AST.Err [Decl]
+--parseDeclarations decls = do
+--  declList <- AST.collapseErr decls.children
+--  fmap concat <$> traverse parseDeclaration declList

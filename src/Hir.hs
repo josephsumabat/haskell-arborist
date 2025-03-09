@@ -2,6 +2,7 @@ module Hir where
 
 import Hir.Types
 import qualified AST
+import Data.Foldable
 
 declName :: Decl -> Name
 declName decl =
@@ -31,3 +32,19 @@ declDynNode decl =
     DeclTypeFamily v -> AST.getDynNode v.node
     DeclTypeSynonym v -> AST.getDynNode v.node
 
+patternNames :: Pattern -> [Name]
+patternNames pat = go pat []
+  where
+    go :: Pattern -> [Name] -> [Name]
+    go PatWildcard acc = acc
+    go (PatVariable name) acc = name : acc
+    go (PatConstructor name pats) acc = foldl' (flip go) (name : acc) pats
+    go (PatTuple pats) acc = foldl' (flip go) acc pats
+    go (PatList pats) acc = foldl' (flip go) acc pats
+    go (PatLiteral _) acc = acc
+    go (PatAs name pat) acc = go pat (name : acc)
+    go (PatInfix p1 name p2) acc = go p1 (go p2 (name : acc))
+    go (PatStrict pat) acc = go pat acc
+    go (PatLazy pat) acc = go pat acc
+    go (PatView _ pat) acc = go pat acc
+    go (PatQuasiquote name pat) acc = go pat (name : acc)

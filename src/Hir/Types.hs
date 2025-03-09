@@ -206,7 +206,7 @@ data Program = Program
   , imports :: [Import]
   , exports :: [ExportItem]
   , decls :: [Decl]
-  , haskell :: H.HaskellP 
+  , dynNode :: DynNode
   }
   deriving (Show)
 
@@ -223,3 +223,73 @@ data ThQuotedName = ThQuotedName
   { isTy :: Bool
   , node :: AST.DynNode
   }
+
+data Expression
+  = ExprVariable Name
+  | ExprConstructor Name
+  | ExprLambda (NonEmpty Name) Expression
+  | ExprApplication Expression [Expression]
+  | ExprInfixApp Expression Name Expression
+  | ExprLet [Decl] Expression
+  | ExprCase Expression [(Pattern, Expression)]
+  | ExprIf Expression Expression Expression
+  | ExprDo [Statement]
+  | ExprTuple [Expression]
+  | ExprList [Expression]
+  | ExprLiteral Literal
+  | ExprSectionLeft Expression Name
+  | ExprSectionRight Name Expression
+  | ExprNegate Expression
+  | ExprTyped Expression Type
+  | ExprSplice Name
+  | ExprQuasiquote Name Expression
+  deriving (Show)
+
+data Pattern
+  = PatWildcard
+  | PatVariable Name
+  | PatConstructor Name [Pattern]
+  | PatTuple [Pattern]
+  | PatList [Pattern]
+  | PatLiteral Literal
+  | PatAs Name Pattern
+  | PatInfix Pattern Name Pattern
+  | PatStrict Pattern
+  | PatLazy Pattern
+  | PatView Expression Pattern
+  | PatQuasiquote Name Pattern
+  deriving (Show)
+
+data Type
+  = TypeVariable Name
+  | TypeConstructor Name
+  | TypeApplication Type [Type]
+  | TypeTuple [Type]
+  | TypeList Type
+  | TypeArrow Type Type
+  | TypeForall [Name] (Maybe Context) Type
+  | TypeConstraint Context Type
+  | TypeInfix Type Name Type
+  | TypeParens Type
+  | TypeQuasiquote Name Type
+  deriving (Show)
+
+data Context
+  = ContextSimple Name
+  | ContextInfix Name Name
+  | ContextParens Context
+  deriving (Show)
+
+data Statement
+  = StmtExpression Expression
+  | StmtBind [Name] Expression
+  | StmtLet [Decl]
+  | StmtRec [Statement]
+  deriving (Show)
+
+data Literal
+  = LitChar Text        -- Represents a character literal
+  | LitFloat Text       -- Represents a floating-point number
+  | LitInt Text         -- Represents an integer literal
+  | LitString Text      -- Represents a string literal
+  deriving (Show, Eq)
