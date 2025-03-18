@@ -1,7 +1,8 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PolyKinds #-}
+
 module Data.Path (
   Path (path, Path, UncheckedPath),
   KnownPathKind (sPathKind),

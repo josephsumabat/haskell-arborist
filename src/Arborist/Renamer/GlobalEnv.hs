@@ -1,17 +1,16 @@
 module Arborist.Renamer.GlobalEnv where
 
-import Hir.Types
-import Data.Maybe
-import TreeSitter.Api
 import Data.HashMap.Lazy qualified as Map
-import Data.Text
 import Data.LineColRange
-import qualified Hir.Types as Hir
-import qualified Hir
+import Data.Maybe
+import Data.Text
+import Hir qualified
+import Hir.Types
+import Hir.Types qualified as Hir
+import TreeSitter.Api
 
 data NameInfo = NameInfo
-  {
-    pos :: LineColRange
+  { pos :: LineColRange
   , name :: Text
   }
   deriving (Show)
@@ -27,7 +26,7 @@ type ModNameT = Text
 type NameT = Text
 
 findName :: ModNameT -> NameT -> ModIndex -> Maybe NameInfo
-findName modName name modIdx = 
+findName modName name modIdx =
   Map.lookup modName modIdx >>= \nameIdx -> Map.lookup name nameIdx
 
 emptyModIndex :: ModIndex
@@ -40,11 +39,10 @@ mkModIndex prgs =
 mkNameIndex :: Hir.Program -> NameIndex
 mkNameIndex prg =
   Map.fromList $ (\decl -> (declNameText decl, declNameInfo decl)) <$> prg.decls
-  where
-    declNameInfo decl =
-      NameInfo
-        {
-          pos = (Hir.declDynNode decl).nodeLineColRange
-        , name = declNameText decl
-        }
-    declNameText decl = (Hir.declName decl).node.nodeText
+ where
+  declNameInfo decl =
+    NameInfo
+      { pos = (Hir.declDynNode decl).nodeLineColRange
+      , name = declNameText decl
+      }
+  declNameText decl = (Hir.declName decl).node.nodeText

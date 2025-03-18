@@ -52,7 +52,7 @@ data ModuleText = ModuleText
   { parts :: NonEmpty Text
   , text :: Text
   }
-  deriving (Show)
+  deriving (Show, Ord)
 
 instance Eq ModuleText where
   (==) = (==) `on` (.text)

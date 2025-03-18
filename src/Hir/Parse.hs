@@ -2,7 +2,6 @@
 
 module Hir.Parse where
 
-import TreeSitter.Api
 import AST (DynNode)
 import AST qualified
 import AST.Haskell qualified as H
@@ -13,14 +12,15 @@ import Control.Error qualified as Error
 import Control.Error.Util (note)
 import Control.Monad (guard)
 import Data.Either qualified as Either
+import Data.Either.Extra (eitherToMaybe)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe qualified as Maybe
 import Data.Range (Range)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Hir.Types
-import Data.Either.Extra (eitherToMaybe)
 import Debug.Trace
+import Hir.Types
+import TreeSitter.Api
 
 parseName :: ParseNameTypes -> Name
 parseName ast = case ast of
@@ -103,7 +103,7 @@ importQualifier i =
   -- or just `FilePath` without the qualifier
   Maybe.fromMaybe i.mod i.alias
 
-findNode :: Show b => (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
+findNode :: (Show b) => (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
 findNode f n = go n
  where
   go n = f n <|> asum (go <$> (AST.nodeChildren n))
@@ -424,7 +424,7 @@ emptyProgram =
     { imports = []
     , exports = Nothing
     , decls = []
-    , mod = Nothing 
+    , mod = Nothing
     , dynNode = AST.defaultNode
     }
 
@@ -432,9 +432,10 @@ parseHaskell :: H.HaskellP -> ([Text], Program)
 parseHaskell h = do
   let res = do
         let imports = Maybe.fromMaybe Nothing $ Error.hush $ AST.collapseErr h.imports
-        let mod = findNode (AST.cast @H.HeaderP) (AST.getDynNode h) >>=
-                  eitherToMaybe  . (.module') >>=
-                    eitherToMaybe . parseModuleText
+        let mod =
+              findNode (AST.cast @H.HeaderP) (AST.getDynNode h)
+                >>= eitherToMaybe . (.module')
+                >>= eitherToMaybe . parseModuleText
         (es, imports) <- case imports of
           Nothing -> pure ([], [])
           Just imports -> parseImports imports
