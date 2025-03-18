@@ -1,8 +1,8 @@
 module Arborist.Debug where
 
+import AST qualified
 import AST.Extension
 import AST.Haskell
-import qualified AST
 import Arborist.Renamer
 
 type PrintExt = Name RenamePhase AST.:+ Name ParsePhase AST.:+ Variable RenamePhase AST.:+ AST.Nil
@@ -14,8 +14,14 @@ debugNodeStr indentLevel node =
       nodeTypeStr = indent <> "Node Type: " <> show (AST.nodeType node) <> "\n"
       separator = indent <> "--------------------------------------\n"
       printNode node =
-            indent <> "Node Ext Type: " <> show (node.ext) <> "\n" <>
-            indent <> "Node Text: " <> show (node.dynNode.nodeText) <> "\n"
+        indent
+          <> "Node Ext Type: "
+          <> show (node.ext)
+          <> "\n"
+          <> indent
+          <> "Node Text: "
+          <> show (node.dynNode.nodeText)
+          <> "\n"
       nodeStr =
         case AST.cast @PrintExt node of
           Just (AST.Inj @(Name RenamePhase) node) ->
@@ -26,14 +32,14 @@ debugNodeStr indentLevel node =
             printNode node
           Just _ -> ""
           Nothing -> ""
-  in nodeTypeStr <> nodeStr <> separator
+   in nodeTypeStr <> nodeStr <> separator
 
 -- Recursive function to generate the entire tree's string representation
 debugTreeStr :: Int -> AST.DynNode -> Prelude.String
 debugTreeStr indentLevel node =
   let nodeStr = debugNodeStr indentLevel node
       childrenStr = concatMap (debugTreeStr (indentLevel + 1)) (AST.nodeChildren node)
-  in nodeStr <> childrenStr
+   in nodeStr <> childrenStr
 
 -- Entry point function with default indentation
 debugTree :: AST.DynNode -> Prelude.String

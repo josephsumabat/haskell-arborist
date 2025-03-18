@@ -1,7 +1,7 @@
 module Hir where
 
+import AST qualified
 import Hir.Types
-import qualified AST
 
 declName :: Decl -> Name
 declName decl =
@@ -30,4 +30,3 @@ declDynNode decl =
     DeclPattern v -> AST.getDynNode v.node
     DeclTypeFamily v -> AST.getDynNode v.node
     DeclTypeSynonym v -> AST.getDynNode v.node
-
