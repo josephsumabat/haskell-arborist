@@ -364,8 +364,8 @@ parseBindingList bs = do
   let names = NE.toList bsu.name
   traverse (parseNamePrefix . AST.subset) names
 
-parsePattern :: H.PatternSynonymP -> AST.Err [Decl]
-parsePattern p = do
+parsePatternSyn :: H.PatternSynonymP -> AST.Err [Decl]
+parsePatternSyn p = do
   p <- p.children
   case p of
     AST.Inj @H.EquationP e -> do
@@ -413,7 +413,7 @@ parseDeclaration decl = case decl.getDeclaration of
   AST.Inj @H.ClassP c -> pure @[] <$> parseClass c
   AST.Inj @H.DataFamilyP d -> pure @[] <$> parseDataFamily d
   AST.Inj @H.NewtypeP n -> pure @[] <$> parseNewtype n
-  AST.Inj @H.PatternSynonymP p -> parsePattern p
+  AST.Inj @H.PatternSynonymP p -> parsePatternSyn p
   AST.Inj @H.TypeFamilyP t -> pure @[] <$> parseTypeFamily t
   AST.Inj @H.TypeSynomymP t -> pure @[] <$> parseTypeSynonym t
   _ -> pure []
@@ -512,3 +512,36 @@ getPersistentModelAtPoint range hs = do
     guard $ funText == name
     (AST.Inj @H.ExpressionP argExpr) <- pure apply.argument
     pure argExpr
+
+parseFunction :: H.FunctionP -> FunctionBind
+parseFunction fnNode =
+  let mFnU = eitherToMaybe $ AST.unwrap fnNode
+      name = maybe "" (nodeText . AST.getDynNode) mFnU
+      mParams = mFnU >>= (.patterns)
+      fnParams = maybe [] parseFunctionParams mParams
+   in FunctionBind
+        { fnName = name
+        , params = fnParams
+        }
+
+type ToParam = H.VariableP :+ H.WildcardP :+ AST.Nil
+
+parseFunctionParams :: H.PatternsP -> [Param]
+parseFunctionParams pats =
+  let mPatU = eitherToMaybe $ AST.unwrap pats
+   in case mPatU of
+        Nothing -> []
+        Just patU ->
+          NE.toList $ (toParam . AST.getDynNode) <$> patU.children
+ where
+  toParam :: DynNode -> Param
+  toParam node =
+    case AST.cast @ToParam node of
+      Just (AST.Inj @H.VariableP node) ->
+        ParamVar $
+          Variable
+            { name = node.dynNode.nodeText
+            , dynNode = node.dynNode
+            }
+      Just (AST.Inj @H.WildcardP _) -> ParamWildcard
+      _ -> ParamOther

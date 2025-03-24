@@ -223,3 +223,26 @@ data ThQuotedName = ThQuotedName
   { isTy :: Bool
   , node :: AST.DynNode
   }
+
+data FunctionBind = FunctionBind
+  { fnName :: Text
+  , params :: [Param]
+  }
+  deriving (Show)
+
+data Params = Params
+  { params :: [Param]
+  }
+  deriving (Show)
+
+data Param
+  = ParamVar Variable
+  | ParamWildcard
+  | ParamOther
+  deriving (Show)
+
+data Variable = Variable
+  { name :: Text
+  , dynNode :: DynNode
+  }
+  deriving (Show)
