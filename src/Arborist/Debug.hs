@@ -6,8 +6,12 @@ import AST.Haskell
 import Arborist.Renamer
 import Data.Text.Lazy qualified as Text
 import Text.Pretty.Simple
+import Debug.Trace
 
 type PrintExt = Module RenamePhase AST.:+ Name RenamePhase AST.:+ Name ParsePhase AST.:+ Variable RenamePhase AST.:+ AST.Nil
+
+traceShowPretty :: Show s => s -> a -> a
+traceShowPretty p v = trace (Text.unpack . pShowNoColor $ p) v
 
 -- Helper function to format a single node
 debugNodeStr :: Int -> AST.DynNode -> Prelude.String

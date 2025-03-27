@@ -2,6 +2,10 @@ module Hir where
 
 import AST qualified
 import Hir.Types
+import Data.Text (Text)
+
+declNameText :: Decl -> Text
+declNameText decl = (declName decl).node.nodeText
 
 declName :: Decl -> Name
 declName decl =

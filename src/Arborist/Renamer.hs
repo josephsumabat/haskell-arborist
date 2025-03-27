@@ -3,29 +3,31 @@
 module Arborist.Renamer where
 
 import AST qualified
-import AST.Extension
 import AST.Haskell qualified as AST
-import AST.Haskell.Generated qualified as AST
 import Arborist.Scope
-import Control.Applicative (Alternative (..))
+import Arborist.Scope.Types
 import Data.Bifunctor qualified as Bifunctor
 import Data.HashMap.Lazy qualified as Map
 import Data.LineColRange
 import Data.List qualified as List
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Data.Text.Lazy qualified as Text
-import Debug.Trace
-import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
+import Debug.Trace
+import qualified Data.Text.Lazy as Text
 import Text.Pretty.Simple
+
+traceShowPretty :: Show s => s -> a -> a
+traceShowPretty p v = trace (Text.unpack . pShowNoColor $ p) v
 
 data RenamePhase
 
 data ResolvedName
   = ResolvedName VarInfo
-  | AmbiguousName [GlblVarInfo]
+  | AmbiguousGlobalName (NE.NonEmpty GlblVarInfo)
+  | AmbiguousLocalName LocalVarInfo
   | NoNameFound
   deriving (Show)
 
@@ -46,11 +48,6 @@ instance AST.NodeX RenamePhase where
   type XVariable RenamePhase = ResolvedName
 
 type HaskellR = AST.Haskell RenamePhase
-
-data ScopeData = ScopeData
-  { bindingName :: T.Text
-  , loc :: LineColRange
-  }
 
 type Resolveable = AST.NameP AST.:+ AST.VariableP AST.:+ AST.Nil
 
@@ -79,10 +76,29 @@ renamePrg availPrgs prg =
  where
   go :: RenamerEnv -> AST.DynNode -> AST.DynNode
   go renamerEnv n =
+    case AST.cast @AST.DoP n of
+      Nothing ->
+        let !newScope = getScope availPrgs n renamerEnv.scope
+            !newRenamerEnv = renamerEnv {scope = newScope}
+            !newChildren = go newRenamerEnv <$> n.nodeChildren
+         in (resolveNode renamerEnv n) {AST.nodeChildren = newChildren}
+      -- do node is a special case since statements are in scope for all
+      -- subsequent statements
+      Just _doNode ->
+        let (_, reversedNewChildren) =
+              List.foldl' resolveDoChild (renamerEnv, []) n.nodeChildren
+            newChildren = reverse reversedNewChildren
+         in (resolveNode renamerEnv n) {AST.nodeChildren = newChildren}
+
+  -- Special case for do notation
+  -- up to the caller to reverse
+  resolveDoChild :: (RenamerEnv, [AST.DynNode]) -> AST.DynNode -> (RenamerEnv, [AST.DynNode])
+  resolveDoChild (renamerEnv, renamedChildren) n =
     let !newScope = getScope availPrgs n renamerEnv.scope
         !newRenamerEnv = renamerEnv {scope = newScope}
-        !newNode = go newRenamerEnv <$> n.nodeChildren
-     in (resolveNode renamerEnv n) {AST.nodeChildren = newNode}
+     in
+     --traceShowPretty (head newScope).lclVarInfo $
+       (newRenamerEnv, go renamerEnv n : renamedChildren)
 
   getImportModName :: Hir.Import -> Hir.ModuleText
   getImportModName imp = fromMaybe imp.mod imp.alias
@@ -98,6 +114,7 @@ renamePrg availPrgs prg =
       Just _ -> n
       Nothing -> n
 
+  -- Lookup a var name
   resolveVarName :: RenamerEnv -> AST.VariableP -> ResolvedName
   resolveVarName renamerEnv varP =
     let varName = varP.dynNode.nodeText
@@ -111,8 +128,19 @@ renamePrg availPrgs prg =
   getLocalResolvedNames :: Scope -> T.Text -> ResolvedName
   getLocalResolvedNames currScope varName =
     case Map.lookup varName (currScope.lclVarInfo) of
+      Just varInfo@(LocalVarParam l) -> case l of
+        (v NE.:| []) -> ResolvedName (VarInfoParam v)
+        _ -> AmbiguousLocalName varInfo
+      Just varInfo@(LocalVarLet l) -> case l of
+        (v NE.:| []) -> ResolvedName (VarInfoLet v)
+        _ -> AmbiguousLocalName varInfo
+      Just varInfo@(LocalVarWhere l) -> case l of
+        (v NE.:| []) -> ResolvedName (VarInfoWhere v)
+        _ -> AmbiguousLocalName varInfo
+      Just varInfo@(LocalVarBind l) -> case l of
+        (v NE.:| []) -> ResolvedName (VarInfoBind  v)
+        _ -> AmbiguousLocalName varInfo
       Nothing -> NoNameFound
-      Just v -> ResolvedName (VarInfoLocal v)
 
   getGlobalResolvedNames :: RenamerEnv -> Scope -> T.Text -> ResolvedName
   getGlobalResolvedNames renamerEnv currScope varName =
@@ -120,7 +148,7 @@ renamePrg availPrgs prg =
      in case varInfos of
           [] -> NoNameFound
           [x] -> ResolvedName (VarInfoGlobal x)
-          xs -> AmbiguousName (xs)
+          (x : xs) -> AmbiguousGlobalName (x NE.:| xs)
 
   getValidGlobalVarInfos :: RenamerEnv -> Scope -> T.Text -> [GlblVarInfo]
   getValidGlobalVarInfos renamerEnv currScope varName =

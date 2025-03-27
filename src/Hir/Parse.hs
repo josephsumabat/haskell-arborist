@@ -545,3 +545,34 @@ parseFunctionParams pats =
             }
       Just (AST.Inj @H.WildcardP _) -> ParamWildcard
       _ -> ParamOther
+
+parsePattern :: H.PatternP -> Pattern
+parsePattern pat =
+  Pattern
+    {
+      patVars = getVars pat.dynNode
+    }
+    where
+      getVars :: DynNode -> [Variable]
+      getVars n =
+        case AST.cast @H.VariableP n of
+          Nothing -> n.nodeChildren >>= getVars
+          Just _v -> 
+            let newVar =
+                  Variable
+                    {
+                      name = n.nodeText
+                    , dynNode = n
+                    } in
+            newVar : (n.nodeChildren >>= getVars)
+
+parseLocalBinds :: H.LocalBindsP -> LocalDecls
+parseLocalBinds localBinds =
+  let mLocalBindsU = eitherToMaybe $ AST.unwrap localBinds
+      mDeclU = fmap AST.getDynNode . (.decl) <$> mLocalBindsU
+   in case mDeclU of
+        Nothing -> LocalDecls []
+        Just declU -> LocalDecls $ Maybe.mapMaybe parseBindDecl declU
+ where
+  parseBindDecl n =
+    eitherToMaybe . parseBind =<< (AST.cast @H.DeclP n)

@@ -241,8 +241,18 @@ data Param
   | ParamOther
   deriving (Show)
 
+data Pattern =
+  Pattern
+    {
+      patVars :: [Variable]
+    }
+
 data Variable = Variable
   { name :: Text
   , dynNode :: DynNode
   }
   deriving (Show)
+
+data LocalDecls = LocalDecls
+  { decls :: [Decl]
+  }
