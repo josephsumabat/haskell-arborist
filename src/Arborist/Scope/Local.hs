@@ -1,10 +1,11 @@
-module Arborist.Scope.Local
-  (addLocalLetBinds 
-  , addLocalWhereBinds 
-  , addParam
-  , addLocalPatVars
-  )
-  where
+module Arborist.Scope.Local (
+  addLocalLetBinds,
+  addLocalWhereBinds,
+  addParam,
+  addLocalPatVars,
+)
+where
+
 import AST
 import Arborist.Scope.Types
 import Data.HashMap.Lazy qualified as Map
@@ -16,21 +17,21 @@ import Hir.Types qualified as Hir
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =
-  let clearedScope = clearPrevLocalNames currScope ((.name) <$> pat.patVars) in
-  List.foldl'
-    (addLocalBind)
-    clearedScope
-    (reverse pat.patVars) -- Reverse for efficiency
+  let clearedScope = clearPrevLocalNames currScope ((.name) <$> pat.patVars)
+   in List.foldl'
+        (addLocalBind)
+        clearedScope
+        (reverse pat.patVars) -- Reverse for efficiency
 
 addLocalLetBinds :: Scope -> Hir.LocalDecls -> Scope
 addLocalLetBinds currScope localBinds =
-  let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls) in
-  List.foldl' (addLocalLetDecl) clearedScope localBinds.decls
+  let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls)
+   in List.foldl' (addLocalLetDecl) clearedScope localBinds.decls
 
 addLocalWhereBinds :: Scope -> Hir.LocalDecls -> Scope
 addLocalWhereBinds currScope localBinds =
-  let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls) in
-  List.foldl' (addLocalWhereDecl) clearedScope localBinds.decls
+  let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls)
+   in List.foldl' (addLocalWhereDecl) clearedScope localBinds.decls
 
 addLocalBind :: Scope -> Hir.Variable -> Scope
 addLocalBind currScope var =
@@ -42,9 +43,8 @@ addLocalBind currScope var =
           Nothing -> []
           Just _ -> []
       -- TODO: reverse at end
-      newInfo = LocalVarBind $ LocalBind var.dynNode NE.:| existing 
-   in 
-     insertScope currScope name newInfo
+      newInfo = LocalVarBind $ LocalBind var.dynNode NE.:| existing
+   in insertScope currScope name newInfo
 
 addLocalWhereDecl :: Scope -> Hir.Decl -> Scope
 addLocalWhereDecl currScope localDecl =
@@ -56,10 +56,9 @@ addLocalWhereDecl currScope localDecl =
           Nothing -> []
           Just _ -> []
       mNewInfo = LocalVarWhere <$> (getNewLocalDecl existing localDecl)
-   in 
-   case mNewInfo of
-     Just newInfo -> insertScope currScope name newInfo
-     Nothing -> currScope
+   in case mNewInfo of
+        Just newInfo -> insertScope currScope name newInfo
+        Nothing -> currScope
 
 addLocalLetDecl :: Scope -> Hir.Decl -> Scope
 addLocalLetDecl currScope localDecl =
@@ -71,14 +70,13 @@ addLocalLetDecl currScope localDecl =
           Just _ -> []
           Nothing -> []
       mNewInfo = LocalVarLet <$> (getNewLocalDecl existing localDecl)
-   in 
-   case mNewInfo of
-     Just newInfo -> insertScope currScope name newInfo
-     Nothing -> currScope
+   in case mNewInfo of
+        Just newInfo -> insertScope currScope name newInfo
+        Nothing -> currScope
 
 insertScope :: Scope -> T.Text -> LocalVarInfo -> Scope
 insertScope currScope name newInfo =
-  currScope { lclVarInfo = Map.insert name newInfo currScope.lclVarInfo }
+  currScope {lclVarInfo = Map.insert name newInfo currScope.lclVarInfo}
 
 clearPrevLocalNames :: Scope -> [T.Text] -> Scope
 clearPrevLocalNames scope names =
@@ -167,4 +165,3 @@ addParam scope param =
               let newLclVarInfo = Map.insert var.name (LocalVarParam $ NE.singleton lclVarInfo) scope.lclVarInfo
                in scope {lclVarInfo = newLclVarInfo}
     _ -> scope
-

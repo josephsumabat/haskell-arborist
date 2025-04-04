@@ -5,12 +5,12 @@ import AST.Extension
 import AST.Haskell
 import Arborist.Renamer
 import Data.Text.Lazy qualified as Text
-import Text.Pretty.Simple
 import Debug.Trace
+import Text.Pretty.Simple
 
 type PrintExt = Module RenamePhase AST.:+ Name RenamePhase AST.:+ Name ParsePhase AST.:+ Variable RenamePhase AST.:+ AST.Nil
 
-traceShowPretty :: Show s => s -> a -> a
+traceShowPretty :: (Show s) => s -> a -> a
 traceShowPretty p v = trace (Text.unpack . pShowNoColor $ p) v
 
 -- Helper function to format a single node
@@ -33,7 +33,8 @@ debugNodeStr indentLevel node =
       printNode node =
         indent
           <> "Node Ext Type: "
-          <> (Text.unpack . pShowNoColor) (node.ext)
+          <> "\n"
+          <> addIndentation (indentLevel * 2) ((Text.unpack . pShowNoColor) (node.ext))
           <> "\n"
           <> indent
           <> "Node Text: "
@@ -56,6 +57,9 @@ debugNodeStr indentLevel node =
           Just _ -> printDynNode node
           Nothing -> printDynNode node
    in nodeTypeStr <> nodeStr <> separator
+
+addIndentation :: Int -> Prelude.String -> Prelude.String
+addIndentation n = unlines . map (replicate (n * 2) ' ' ++) . lines
 
 -- Recursive function to generate the entire tree's string representation
 debugTreeStr :: Int -> AST.DynNode -> Prelude.String

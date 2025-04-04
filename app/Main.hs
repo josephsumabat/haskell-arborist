@@ -3,13 +3,16 @@ module Main where
 import AST.Cast
 import AST.Haskell qualified
 import Arborist.Debug
+import Arborist.ModGraph
 import Arborist.Renamer (renamePrg)
 import Arborist.Renamer.GlobalEnv
 import Arborist.Scope
+import Arborist.Scope.Global
 import Control.Monad (forM)
 import Criterion.Main
 import Criterion.Types (Config (..))
-import Data.Maybe (fromJust)
+import Data.HashMap.Lazy qualified as Map
+import Data.Maybe (catMaybes, fromJust)
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO.Utf8 qualified as BS
 import Data.Text.IO.Utf8 qualified as Utf8
@@ -33,18 +36,22 @@ main = do
   prgs <- lazyGetPrgs hsFiles
   let modIndex = mkModIndex prgs
   let found = findName "Mobile.InternalAuthorization.Handler" "postMobileTokenLoginR" modIndex
-  -- benchmarkMain modIndex prgs
-
   let haskell = fromJust $ cast @AST.Haskell.HaskellP (last prgs).dynNode
-  let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renamePrg (last prgs)
-  requiredPrograms <- getRequiredScopePrograms (last prgs) [src]
-  _ <- putStrLn debugTreeStr
+  target <- head <$> lazyGetPrgs ["../mercury-web-backend/src/Mobile/Push.hs"]
+  requiredPrograms <- gatherScopeDeps target [src]
+  let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renamePrg requiredPrograms target
+  let allRenamed = (\prg -> renamePrg (prgsToMap prgs) prg) <$> prgs
+  let debugAllTreeStr _s = catMaybes $ fmap (debugTree . (.dynNode)) <$> allRenamed
+
+  -- benchmarkMain modIndex debugAllTreeStr prgs
+
+  -- _ <- putStrLn debugTreeStr
   time
     ( withFile "myFile.txt" AppendMode $ \h -> do
         hSetEncoding h utf8 -- Set UTF-8 encoding
         -- hPutStrLn h (Text.unpack (pShowNoColor (head prgs)))
-        -- hPutStrLn h debugTreeStr
-        hPutStrLn h (Text.unpack $ pShowNoColor (getAvailableNames requiredPrograms (last prgs)))
+        -- hPutStrLn h (Text.unpack $ pShowNoColor (getAvailableNames requiredPrograms (last prgs)))
+        hPutStrLn h (debugTreeStr)
     )
     "abc"
 
@@ -75,10 +82,11 @@ getParPrgs hsFiles = mapConcurrently processFile hsFiles
     fileContents <- BS.readFile file -- Read as ByteString (fastest method)
     pure $ snd (parsePrg fileContents) -- Run `test` function
 
-benchmarkMain modIndex prgs =
+benchmarkMain modIndex debugAllTreeStr prgs =
   defaultMainWith
     (defaultConfig {resamples = 1})
     [ bench "mem" $ nf ((fmap (.name)) . findName "Mobile.InternalAuthorization.Handler" "postMobileTokenLoginR") modIndex
+    , bench "rename" $ nf debugAllTreeStr ()
     ]
 
 config :: Config

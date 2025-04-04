@@ -549,22 +549,20 @@ parseFunctionParams pats =
 parsePattern :: H.PatternP -> Pattern
 parsePattern pat =
   Pattern
-    {
-      patVars = getVars pat.dynNode
+    { patVars = getVars pat.dynNode
     }
-    where
-      getVars :: DynNode -> [Variable]
-      getVars n =
-        case AST.cast @H.VariableP n of
-          Nothing -> n.nodeChildren >>= getVars
-          Just _v -> 
-            let newVar =
-                  Variable
-                    {
-                      name = n.nodeText
-                    , dynNode = n
-                    } in
-            newVar : (n.nodeChildren >>= getVars)
+ where
+  getVars :: DynNode -> [Variable]
+  getVars n =
+    case AST.cast @H.VariableP n of
+      Nothing -> n.nodeChildren >>= getVars
+      Just _v ->
+        let newVar =
+              Variable
+                { name = n.nodeText
+                , dynNode = n
+                }
+         in newVar : (n.nodeChildren >>= getVars)
 
 parseLocalBinds :: H.LocalBindsP -> LocalDecls
 parseLocalBinds localBinds =

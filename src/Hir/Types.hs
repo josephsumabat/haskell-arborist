@@ -146,13 +146,13 @@ data BindDecl = BindDecl
   { name :: Name
   , node :: H.BindP :+ H.FunctionP :+ AST.Nil
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data SigDecl = SigDecl
   { name :: Name
   , node :: H.SignatureP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data DataFamilyDecl = DataFamilyDecl
   {name :: Name, node :: H.DataFamilyP}
@@ -241,17 +241,15 @@ data Param
   | ParamOther
   deriving (Show)
 
-data Pattern =
-  Pattern
-    {
-      patVars :: [Variable]
-    }
+data Pattern = Pattern
+  { patVars :: [Variable]
+  }
 
 data Variable = Variable
   { name :: Text
   , dynNode :: DynNode
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data LocalDecls = LocalDecls
   { decls :: [Decl]

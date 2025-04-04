@@ -4,6 +4,7 @@ module Arborist.Renamer where
 
 import AST qualified
 import AST.Haskell qualified as AST
+import Arborist.ModGraph
 import Arborist.Scope
 import Arborist.Scope.Types
 import Data.Bifunctor qualified as Bifunctor
@@ -14,18 +15,18 @@ import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Hir.Types qualified as Hir
+import Data.Text.Lazy qualified as Text
 import Debug.Trace
-import qualified Data.Text.Lazy as Text
+import Hir.Types qualified as Hir
 import Text.Pretty.Simple
 
-traceShowPretty :: Show s => s -> a -> a
+traceShowPretty :: (Show s) => s -> a -> a
 traceShowPretty p v = trace (Text.unpack . pShowNoColor $ p) v
 
 data RenamePhase
 
 data ResolvedName
-  = ResolvedName VarInfo
+  = ResolvedName ResolvedVarInfo
   | AmbiguousGlobalName (NE.NonEmpty GlblVarInfo)
   | AmbiguousLocalName LocalVarInfo
   | NoNameFound
@@ -96,9 +97,8 @@ renamePrg availPrgs prg =
   resolveDoChild (renamerEnv, renamedChildren) n =
     let !newScope = getScope availPrgs n renamerEnv.scope
         !newRenamerEnv = renamerEnv {scope = newScope}
-     in
-     --traceShowPretty (head newScope).lclVarInfo $
-       (newRenamerEnv, go renamerEnv n : renamedChildren)
+     in -- traceShowPretty (head newScope).lclVarInfo $
+        (newRenamerEnv, go renamerEnv n : renamedChildren)
 
   getImportModName :: Hir.Import -> Hir.ModuleText
   getImportModName imp = fromMaybe imp.mod imp.alias
@@ -129,16 +129,16 @@ renamePrg availPrgs prg =
   getLocalResolvedNames currScope varName =
     case Map.lookup varName (currScope.lclVarInfo) of
       Just varInfo@(LocalVarParam l) -> case l of
-        (v NE.:| []) -> ResolvedName (VarInfoParam v)
+        (v NE.:| []) -> ResolvedName (ResolvedLocal (VarInfoParam v))
         _ -> AmbiguousLocalName varInfo
       Just varInfo@(LocalVarLet l) -> case l of
-        (v NE.:| []) -> ResolvedName (VarInfoLet v)
+        (v NE.:| []) -> ResolvedName (ResolvedLocal (VarInfoLet v))
         _ -> AmbiguousLocalName varInfo
       Just varInfo@(LocalVarWhere l) -> case l of
-        (v NE.:| []) -> ResolvedName (VarInfoWhere v)
+        (v NE.:| []) -> ResolvedName (ResolvedLocal (VarInfoWhere v))
         _ -> AmbiguousLocalName varInfo
       Just varInfo@(LocalVarBind l) -> case l of
-        (v NE.:| []) -> ResolvedName (VarInfoBind  v)
+        (v NE.:| []) -> ResolvedName (ResolvedLocal (VarInfoBind v))
         _ -> AmbiguousLocalName varInfo
       Nothing -> NoNameFound
 
@@ -147,7 +147,7 @@ renamePrg availPrgs prg =
     let varInfos = getValidGlobalVarInfos renamerEnv currScope varName
      in case varInfos of
           [] -> NoNameFound
-          [x] -> ResolvedName (VarInfoGlobal x)
+          [x] -> ResolvedName (ResolvedGlobal x)
           (x : xs) -> AmbiguousGlobalName (x NE.:| xs)
 
   getValidGlobalVarInfos :: RenamerEnv -> Scope -> T.Text -> [GlblVarInfo]
