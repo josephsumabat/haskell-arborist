@@ -38,10 +38,17 @@ library
   exposed-modules:
       Arborist.Debug
       Arborist.Exports
+      Arborist.Haddock
       Arborist.ModExports
+      Arborist.ModGraph
+      Arborist.ProgramIndex
       Arborist.Renamer
       Arborist.Renamer.GlobalEnv
+      Arborist.Rewrite
       Arborist.Scope
+      Arborist.Scope.Global
+      Arborist.Scope.Local
+      Arborist.Scope.Types
       Data.Path
       HaskellAnalyzer
       Hir
@@ -89,7 +96,7 @@ library
     , lens
     , optics
     , pretty-simple
-    , text ==2.1.2
+    , text
     , text-range
     , time
     , tree-sitter-ast
@@ -145,7 +152,7 @@ executable haskell-arborist
     , lens
     , optics
     , pretty-simple
-    , text ==2.1.2
+    , text
     , text-range
     , time
     , tree-sitter-ast
@@ -203,7 +210,7 @@ test-suite haskell-arborist-test
     , lens
     , optics
     , pretty-simple
-    , text ==2.1.2
+    , text
     , text-range
     , time
     , tree-sitter-ast

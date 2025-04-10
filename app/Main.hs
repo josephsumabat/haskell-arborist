@@ -14,14 +14,13 @@ import Criterion.Types (Config (..))
 import Data.HashMap.Lazy qualified as Map
 import Data.Maybe (catMaybes, fromJust)
 import Data.Text.Encoding qualified as TE
-import Data.Text.IO.Utf8 qualified as BS
-import Data.Text.IO.Utf8 qualified as Utf8
+import Data.Text.IO qualified as Text
 import Data.Text.Lazy qualified as Text
-import Data.Text.Lazy.IO qualified as Text
 import Data.Time
 import Debug.Trace
 import GHC.IO (unsafeInterleaveIO)
 import HaskellAnalyzer
+import Hir.Parse
 import Hir.Types qualified as Hir
 import System.IO
 import Text.Pretty.Simple
@@ -38,9 +37,10 @@ main = do
   let found = findName "Mobile.InternalAuthorization.Handler" "postMobileTokenLoginR" modIndex
   let haskell = fromJust $ cast @AST.Haskell.HaskellP (last prgs).dynNode
   target <- head <$> lazyGetPrgs ["../mercury-web-backend/src/Mobile/Push.hs"]
-  requiredPrograms <- gatherScopeDeps target [src]
-  let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renamePrg requiredPrograms target
-  let allRenamed = (\prg -> renamePrg (prgsToMap prgs) prg) <$> prgs
+  (requiredPrograms, exportIdx) <- gatherScopeDeps target [src]
+  let modText = parseModuleTextFromText "Mobile.AppLink"
+  let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renamePrg requiredPrograms exportIdx target
+  let allRenamed = (\prg -> renamePrg (prgsToMap prgs) Map.empty prg) <$> prgs
   let debugAllTreeStr _s = catMaybes $ fmap (debugTree . (.dynNode)) <$> allRenamed
 
   -- benchmarkMain modIndex debugAllTreeStr prgs
@@ -65,13 +65,13 @@ lazyGetPrgs hsFiles = do
 parseFile :: [Char] -> IO Hir.Program
 parseFile file = do
   traceShowM $ "parsing: " <> file
-  fileContents <- BS.readFile file -- Read as ByteString (fastest method)
+  fileContents <- Text.readFile file
   pure $ snd (parsePrg fileContents) -- Run `test` function
 
 getPrgs :: [FilePath] -> IO [Hir.Program]
 getPrgs hsFiles =
   forM hsFiles $ \file -> do
-    fileContents <- Utf8.readFile file
+    fileContents <- Text.readFile file
     let v = parsePrg fileContents
     pure $ snd v
 
@@ -79,7 +79,7 @@ getParPrgs :: [FilePath] -> IO [Hir.Program]
 getParPrgs hsFiles = mapConcurrently processFile hsFiles
  where
   processFile file = do
-    fileContents <- BS.readFile file -- Read as ByteString (fastest method)
+    fileContents <- Text.readFile file -- Read as ByteString (fastest method)
     pure $ snd (parsePrg fileContents) -- Run `test` function
 
 benchmarkMain modIndex debugAllTreeStr prgs =

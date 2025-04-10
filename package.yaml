@@ -29,7 +29,7 @@ dependencies:
   - lens
   - optics
   - pretty-simple
-  - text == 2.1.2
+  - text
   - text-range
   - tree-sitter-ast
   - tree-sitter-haskell

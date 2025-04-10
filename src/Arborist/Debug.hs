@@ -1,4 +1,8 @@
-module Arborist.Debug where
+module Arborist.Debug (
+  traceShowPretty,
+  debugTree,
+)
+where
 
 import AST qualified
 import AST.Extension

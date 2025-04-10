@@ -105,4 +105,3 @@ emptyScope =
     { glblVarInfo = Map.empty
     , lclVarInfo = Map.empty
     }
-

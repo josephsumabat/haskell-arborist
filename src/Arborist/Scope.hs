@@ -10,20 +10,20 @@ import Arborist.Scope.Local
 import Arborist.Scope.Types
 import Control.Error (headMay)
 import Data.Either.Extra
-import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.Maybe
+import Debug.Trace
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
 
-getScope :: ProgramIndex -> AST.DynNode -> [Scope] -> [Scope]
-getScope availPrgs n !scopeStack =
+getScope :: ProgramIndex -> ExportIndex -> AST.DynNode -> [Scope] -> [Scope]
+getScope availPrgs exportIdx n !scopeStack =
   let currScope = fromMaybe emptyScope (headMay scopeStack)
    in case AST.cast @ScopeChanger n of
         Just (AST.Inj @(AST.HaskellP) haskellNode) ->
           -- Add top level and imported bindings
           let (_, prg) = Hir.parseHaskell haskellNode
-              availableNames = getGlobalAvailableNames availPrgs prg
+              availableNames = getGlobalAvailableNames availPrgs exportIdx prg
               modScope = availableNamesToScope availableNames
            in modScope : scopeStack
         Just (AST.Inj @(AST.FunctionP) fnNode) ->
@@ -35,7 +35,7 @@ getScope availPrgs n !scopeStack =
                 List.foldl' addParam curScope params
               scopeWithBinds =
                 case mWhereBinds of
-                  Nothing -> scopeStack
+                  Nothing -> scopeWithParams : scopeStack
                   Just localBinds -> addLocalWhereBinds scopeWithParams (Hir.parseLocalBinds localBinds) : scopeStack
            in scopeWithBinds
         Just (AST.Inj @(AST.LetInP) letInNode) ->

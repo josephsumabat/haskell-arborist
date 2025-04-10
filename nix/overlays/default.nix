@@ -44,6 +44,7 @@ in
           url = "https://github.com/oberblastmeister/tasty-expect.git";
           sha256 = "sha256-KxunyEutnwLeynUimiIkRe5w/3IdmbD/9hGVi68UVfU=";
           rev = "ec14d702660c79a907e9c45812958cd0df0f036f";
+
         }) {};
 
       };

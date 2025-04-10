@@ -1,6 +1,7 @@
 module Hir where
 
 import AST qualified
+import Control.Error
 import Data.Text (Text)
 import Hir.Types
 
@@ -34,3 +35,19 @@ declDynNode decl =
     DeclPattern v -> AST.getDynNode v.node
     DeclTypeFamily v -> AST.getDynNode v.node
     DeclTypeSynonym v -> AST.getDynNode v.node
+
+exportItemMods :: [ExportItem] -> [ModuleName]
+exportItemMods exports =
+  mapMaybe exportItemToMod exports
+ where
+  exportItemToMod :: ExportItem -> Maybe ModuleName
+  exportItemToMod (ExportModuleItem mod) = Just mod
+  exportItemToMod _ = Nothing
+
+exportItemNames :: [ExportItem] -> [Name]
+exportItemNames exports =
+  mapMaybe exportItemToName exports
+ where
+  exportItemToName :: ExportItem -> Maybe Name
+  exportItemToName (ExportItem {name}) = Just name.name
+  exportItemToName _ = Nothing
