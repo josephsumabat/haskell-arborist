@@ -37,6 +37,7 @@ flag par
 library
   exposed-modules:
       Arborist.Debug
+      Arborist.DocIndex
       Arborist.Exports
       Arborist.Haddock
       Arborist.ModExports
@@ -83,6 +84,7 @@ library
   build-depends:
       aeson
     , base
+    , bytestring
     , containers >=0.6.0 && <0.8
     , criterion
     , deepseq
@@ -138,6 +140,7 @@ executable haskell-arborist
   build-depends:
       aeson
     , base
+    , bytestring
     , containers >=0.6.0 && <0.8
     , criterion
     , deepseq
@@ -195,6 +198,7 @@ test-suite haskell-arborist-test
   build-depends:
       aeson
     , base
+    , bytestring
     , containers >=0.6.0 && <0.8
     , criterion
     , deepseq

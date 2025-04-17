@@ -12,6 +12,8 @@ import Data.HashMap.Lazy qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Data.Text.Encoding qualified as T
+import Data.ByteString qualified as BS
 import Debug.Trace
 import HaskellAnalyzer
 import Hir
@@ -129,7 +131,7 @@ getPrgs prgs hsFiles = do
             Dir.doesFileExist file
           if fileExists
             then do
-              fileContents <- T.readFile file
+              fileContents <- fmap T.decodeUtf8 . BS.readFile $ file
               let (_src, prg) = parsePrg fileContents
               pure $ Just [(modText, prg)]
             else pure Nothing
