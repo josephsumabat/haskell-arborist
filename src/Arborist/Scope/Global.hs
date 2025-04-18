@@ -63,30 +63,48 @@ declToNameInfo originatingMod importedFrom qualified decl =
     , decl = decl
     }
 
--- | Get names that an import brings into the global scope
--- Respects qualification, hiding, import list etc.
+-- Public API wrappers
+getExportedNames :: ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedName], ExportIndex)
+getExportedNames prgIdx exportIdx modName =
+  getExportedNames' prgIdx exportIdx Set.empty modName
+
+getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblNameInfo], ExportIndex)
+getManyImportNames prgIdx exportIdx imps =
+  getManyImportNames' prgIdx exportIdx Set.empty imps
+
 getImportNames :: ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblNameInfo], ExportIndex)
-getImportNames prgIndex exportIndex thisImport =
+getImportNames prgIdx exportIdx imp =
+  getImportNames' prgIdx exportIdx Set.empty imp
+
+-- Internal cycle-safe versions
+getImportNames' ::
+  ProgramIndex ->
+  ExportIndex ->
+  Set.Set ModuleText ->
+  Hir.Import ->
+  ([GlblNameInfo], ExportIndex)
+getImportNames' prgIndex exportIndex inProgress thisImport =
   let qualified = thisImport.qualified
       mod = thisImport.mod
-      (exportedNames, updatedExportIndex) = getExportedNames prgIndex exportIndex mod
-      glblNameInfo = exportToInfo thisImport.mod qualified <$> exportedNames
+      (exportedNames, updatedExportIndex) = getExportedNames' prgIndex exportIndex inProgress mod
+      glblNameInfo = exportToInfo mod qualified <$> exportedNames
       importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> thisImport.importList
       importList
-        -- return everything if no import list
         | null importNames = glblNameInfo
-        -- Remove when hidden import list
         | thisImport.hiding = filter (\n -> not (Set.member n.name importNames)) glblNameInfo
-        -- include only things in importlist
         | otherwise = filter (\n -> Set.member n.name importNames) glblNameInfo
    in (importList, updatedExportIndex)
 
--- | Get multiple import names caching re-exports along the way
-getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblNameInfo], ExportIndex)
-getManyImportNames prgIndex exportIndex imports =
+getManyImportNames' ::
+  ProgramIndex ->
+  ExportIndex ->
+  Set.Set ModuleText ->
+  [Hir.Import] ->
+  ([GlblNameInfo], ExportIndex)
+getManyImportNames' prgIndex exportIndex inProgress imports =
   List.foldl'
-    ( \(importedNamesAgg, idx) prg ->
-        let (importedNames, nextIdx) = getImportNames prgIndex idx prg
+    ( \(importedNamesAgg, idx) imp ->
+        let (importedNames, nextIdx) = getImportNames' prgIndex idx inProgress imp
          in (importedNames <> importedNamesAgg, nextIdx)
     )
     ([], exportIndex)
@@ -94,73 +112,58 @@ getManyImportNames prgIndex exportIndex imports =
 
 getTransitiveReExports :: Hir.Program -> [Hir.ExportItem] -> Set.Set T.Text
 getTransitiveReExports prg exports =
-  let declaredNames = fmap (\decl -> (declNameText decl)) prg.decls
+  let declaredNames = fmap declNameText prg.decls
       declaredNamesSet = Set.fromList declaredNames
-      exportNamesSet =
-        Set.fromList $
-          (.node.nodeText)
-            <$> (exportItemNames exports)
-      transitiveReexportNames = exportNamesSet `Set.difference` declaredNamesSet
-   in transitiveReexportNames
+      exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exports
+   in exportNamesSet `Set.difference` declaredNamesSet
 
--- | get information about all names exported by a module
-getExportedNames ::
+getExportedNames' ::
   ProgramIndex ->
   ExportIndex ->
+  Set.Set ModuleText ->
   ModuleText ->
   ([ExportedName], ExportIndex)
-getExportedNames prgIndex exportIndex modName =
-  let found = Map.lookup modName exportIndex
-   in case found of
-        Just v -> (v, exportIndex)
-        Nothing ->
-          case Map.lookup modName prgIndex of
-            Nothing -> ([], exportIndex)
-            Just prg -> getExportedNamesFromPrg prg
+getExportedNames' prgIndex exportIndex inProgress modName
+  | modName `Set.member` inProgress = ([], exportIndex)
+  | Just exports <- Map.lookup modName exportIndex = (exports, exportIndex)
+  | Just prg <- Map.lookup modName prgIndex = getExportedNamesFromPrg prg
+  | otherwise = ([], exportIndex)
  where
   getExportedNamesFromPrg :: Hir.Program -> ([ExportedName], ExportIndex)
   getExportedNamesFromPrg prg =
     let declaredNames = getDeclaredNames modName prg
+        inProgress' = Set.insert modName inProgress
      in case prg.exports of
-          -- If there is no export list then just declared names are exported
           Nothing ->
-            let idxWithSelf = Map.insert modName declaredNames exportIndex
-             in (declaredNames, idxWithSelf)
+              let exportIdxWithSelf = Map.insert modName declaredNames exportIndex in
+             (declaredNames, exportIdxWithSelf)
           Just exportLst ->
             let
-              exportNamesSet =
-                Set.fromList $
-                  (.node.nodeText)
-                    <$> (exportItemNames exportLst)
+              exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exportLst
               transitiveReexportNames = getTransitiveReExports prg exportLst
               reExportedMods = Set.fromList $ (.mod) <$> exportItemMods exportLst
-              -- Handle transitively re-exported names - avoid getting
-              -- transitive dependencies that are not required
               requiredImports =
                 if null transitiveReexportNames
                   then filter (\imp -> imp.mod `Set.member` reExportedMods) prg.imports
                   else prg.imports
 
-              -- Use the export index with declared names in case of cycles
-              idxWithEmpty = Map.insert modName [] exportIndex
               (allImportedNames, updatedExportIdx) =
-                getManyImportNames prgIndex idxWithEmpty requiredImports
+                getManyImportNames' prgIndex exportIndex inProgress' requiredImports
+
               transitiveReexportNamesInfo =
                 filter
-                  ( \expInfo ->
-                      expInfo.name `Set.member` exportNamesSet
-                        || expInfo.importedFrom `Set.member` reExportedMods
+                  (\expInfo ->
+                    expInfo.name `Set.member` exportNamesSet
+                      || expInfo.importedFrom `Set.member` reExportedMods
                   )
                   allImportedNames
+
               exportedNames =
                 (infoToExport <$> transitiveReexportNamesInfo)
-                  <> filter
-                    (\expInfo -> expInfo.name `Set.member` exportNamesSet)
-                    declaredNames
-              updateExportIdxWithSelf =
-                Map.insert modName exportedNames updatedExportIdx
-             in
-              (exportedNames, updateExportIdxWithSelf)
+                  <> filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
+
+              updateExportIdxWithSelf = Map.insert modName exportedNames updatedExportIdx
+             in (exportedNames, updateExportIdxWithSelf)
 
 getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedName]
 getDeclaredNames mod prg =
@@ -200,7 +203,6 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
         updatedVarMap = Map.insert nameKey updatedModMap currentMap
      in scope {glblVarInfo = updatedVarMap}
 
-  -- If an existing bind or signature exists with the same fully qualified name add it to the same `glblVarInfo
   tryMergeBind :: Hir.BindDecl -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeBind b importedFrom origMod [] =
     (Just (GlblVarInfo {sig = Nothing, binds = [b], importedFrom, originatingMod = origMod, name = b.name}), [])

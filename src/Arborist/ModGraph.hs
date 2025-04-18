@@ -96,13 +96,7 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
   | Set.null remaining = pure (prgs, exportIdx)
   | Set.member modText visited = resolveReexports remaining prgs exportIdx visited rest baseDirs
   | otherwise = do
-      let prgs' = Map.insert modText prg prgs
-          visited' = Set.insert modText visited
 
-          -- Export resolution
-          (exportedNames, exportIdx') = getExportedNames prgs' exportIdx modText
-          found = Set.fromList (map (.name) exportedNames)
-          stillMissing = remaining `Set.difference` found
 
       -- If we still have missing names, explore imports
       let requiredFilesWithSrc =
@@ -116,9 +110,17 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
                       then exportedMods >>= modWithFiles baseDirs
                       else allImportMods >>= modWithFiles baseDirs
 
-      newPrgs <- getPrgs prgs' requiredFilesWithSrc
+      newPrgs <- getPrgs prgs requiredFilesWithSrc
+      let prgs' = insertMany newPrgs (Map.insert modText prg prgs)
 
-      resolveReexports stillMissing prgs' exportIdx' visited' (newPrgs ++ rest) baseDirs
+      -- Export resolution
+      let (exportedNames, exportIdx') = getExportedNames prgs' exportIdx modText
+          found = Set.fromList (map (.name) exportedNames)
+          stillMissing = remaining `Set.difference` found
+          visited' = Set.insert modText visited
+      let newPrgsIdx = insertMany newPrgs prgs'
+
+      resolveReexports stillMissing newPrgsIdx exportIdx' visited' (newPrgs ++ rest) baseDirs
 
 getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO [(ModuleText, Hir.Program)]
 getPrgs prgs hsFiles = do
@@ -131,6 +133,7 @@ getPrgs prgs hsFiles = do
             Dir.doesFileExist file
           if fileExists
             then do
+              -- traceShowM $ "Parsing " <> file
               fileContents <- fmap T.decodeUtf8 . BS.readFile $ file
               let (_src, prg) = parsePrg fileContents
               pure $ Just [(modText, prg)]
