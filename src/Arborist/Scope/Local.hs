@@ -14,6 +14,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir
 import Hir.Types qualified as Hir
+import Control.Error (headMay)
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =
@@ -107,41 +108,46 @@ getNewLocalDecl existing decl =
  where
   tryMergeBind :: Hir.BindDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeBind b [] =
-    (Just (LocalDecl {sig = Nothing, binds = [b]}), [])
+    (Just (LocalDecl {sig = Nothing, binds = [b], loc = (AST.getDynNode b.node).nodeLineColRange}), [])
   tryMergeBind b (v : vs) =
     case v.binds of
       [] ->
         let merged :: LocalDecl
-            merged = setBind [b] v
+            merged = setBind b v
          in (Just merged, vs)
       b : _rest ->
         let (result, rest) = tryMergeBind b vs
          in (result, v : rest)
 
-  setBind :: [Hir.BindDecl] -> LocalDecl -> LocalDecl
+  setBind :: Hir.BindDecl -> LocalDecl -> LocalDecl
   setBind b v =
     LocalDecl
-      { binds = b
+      { binds = [b]
       , sig = v.sig
+      , loc = (AST.getDynNode b.node).nodeLineColRange
       }
 
   tryMergeSig :: Hir.SigDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeSig s [] =
-    (Just (LocalDecl {sig = Just s, binds = []}), [])
+    (Just (LocalDecl {sig = Just s, binds = [], loc = (AST.getDynNode s.node).nodeLineColRange}), [])
   tryMergeSig s (v : vs) =
     case v.sig of
       Nothing ->
-        let merged = setSig (Just s) v
+        let merged = setSig s v
          in (Just merged, vs)
       Just _ ->
         let (result, rest) = tryMergeSig s vs
          in (result, v : rest)
 
-  setSig :: Maybe Hir.SigDecl -> LocalDecl -> LocalDecl
+  setSig :: Hir.SigDecl -> LocalDecl -> LocalDecl
   setSig s v =
     LocalDecl
       { binds = v.binds
-      , sig = s
+      , sig = Just s
+      , loc =
+          case headMay v.binds of
+            Nothing -> (AST.getDynNode s.node).nodeLineColRange
+            Just b -> (AST.getDynNode b.node).nodeLineColRange
       }
 
 addParam :: Scope -> Hir.Param -> Scope

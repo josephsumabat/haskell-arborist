@@ -7,6 +7,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import Data.LineColRange
 
 data GlblNameInfo = GlblNameInfo
   { name :: T.Text
@@ -27,6 +28,7 @@ data GlblVarInfo = GlblVarInfo
   , binds :: [Hir.BindDecl]
   , importedFrom :: ModuleText
   , originatingMod :: ModuleText
+  , loc :: LineColRange
   , name :: Hir.Name
   }
   deriving (Show)
@@ -39,6 +41,14 @@ data LocalVarInfo
     LocalVarWhere (NE.NonEmpty LocalDecl)
   | LocalVarBind (NE.NonEmpty LocalBind)
   deriving (Show)
+
+lclVarInfoToLoc :: LocalVarInfo -> NE.NonEmpty LineColRange
+lclVarInfoToLoc lclVarInfo =
+  case lclVarInfo of
+    LocalVarParam lclParams -> (.var.dynNode.nodeLineColRange) <$> lclParams
+    LocalVarLet lclDecls -> (.loc) <$> lclDecls
+    LocalVarWhere lclDecls -> (.loc) <$> lclDecls
+    LocalVarBind lclBinds -> (.dynNode.nodeLineColRange) <$> lclBinds
 
 data LocalBind = LocalBind
   { dynNode :: Node
@@ -53,6 +63,7 @@ data LocalParam = LocalParam
 data LocalDecl = LocalDecl
   { sig :: Maybe Hir.SigDecl
   , binds :: [Hir.BindDecl]
+  , loc :: LineColRange
   }
   deriving (Show, Eq)
 
@@ -72,6 +83,14 @@ data ResolvedLocalVarInfo
   | VarInfoWhere LocalDecl
   | VarInfoBind LocalBind
   deriving (Show, Eq)
+
+resolvedLclVarToLoc :: ResolvedLocalVarInfo -> LineColRange
+resolvedLclVarToLoc resolvedVar =
+  case resolvedVar of
+    VarInfoParam lclParam -> lclParam.var.dynNode.nodeLineColRange
+    VarInfoLet lclDecl -> lclDecl.loc
+    VarInfoWhere lclDecl -> lclDecl.loc
+    VarInfoBind lclBind -> lclBind.dynNode.nodeLineColRange
 
 -- | Var infos for a name indexed by module
 type GlblVarInfoMap = Map.HashMap T.Text ModVarInfoMap

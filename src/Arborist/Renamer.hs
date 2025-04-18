@@ -1,7 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TupleSections #-}
 
 module Arborist.Renamer (
   renamePrg,
+  resolvedLocs,
   ResolvedVariable (..),
   ResolvedName (..),
   RenamePhase,
@@ -19,11 +21,10 @@ import Data.Bifunctor qualified as Bifunctor
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Debug.Trace
 import Hir.Types qualified as Hir
+import Data.LineColRange
 
 data RenamePhase
 
@@ -34,6 +35,21 @@ data ResolvedVariable
   | ResolvedField
   | NoVarFound
   deriving (Show)
+
+resolvedLocs :: Hir.ModuleText -> ResolvedVariable ->  [(Hir.ModuleText, LineColRange)]
+resolvedLocs thisMod resolvedVar =
+  case resolvedVar of
+    ResolvedVariable resolvedVarInfo -> 
+      case resolvedVarInfo of
+        ResolvedGlobal glblVarInfo ->
+          [(glblVarInfo.originatingMod, glblVarInfo.loc)]
+        ResolvedLocal lclVarInfo ->
+          [(thisMod, resolvedLclVarToLoc lclVarInfo)]
+    AmbiguousGlobalVar glblVars ->
+      NE.toList $ (\glblVar -> (glblVar.originatingMod, glblVar.loc)) <$> glblVars
+    AmbiguousLocalVar lclVars -> (thisMod,) <$> (NE.toList $ lclVarInfoToLoc lclVars)
+    ResolvedField -> []
+    NoVarFound -> []
 
 data ResolvedName
   = NoNameFound

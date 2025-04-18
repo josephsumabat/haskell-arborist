@@ -205,10 +205,10 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
 
   tryMergeBind :: Hir.BindDecl -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeBind b importedFrom origMod [] =
-    (Just (GlblVarInfo {sig = Nothing, binds = [b], importedFrom, originatingMod = origMod, name = b.name}), [])
+    (Just (GlblVarInfo {sig = Nothing, binds = [b], importedFrom, originatingMod = origMod, name = b.name, loc = (AST.getDynNode b.node).nodeLineColRange}), [])
   tryMergeBind b importedFrom origMod (v : vs)
     | null v.binds =
-        let merged = v {binds = [b], importedFrom}
+      let merged = v {binds = [b], loc = (AST.getDynNode b.node).nodeLineColRange, importedFrom}
          in (Just merged, vs)
     | otherwise =
         let (result, rest) = tryMergeBind b importedFrom origMod vs
@@ -216,7 +216,7 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
 
   tryMergeSig :: Hir.SigDecl -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeSig s importedFrom origMod [] =
-    (Just (GlblVarInfo {sig = Just s, binds = [], importedFrom, originatingMod = origMod, name = s.name}), [])
+    (Just (GlblVarInfo {sig = Just s, binds = [], importedFrom, originatingMod = origMod, name = s.name, loc = (AST.getDynNode s.node).nodeLineColRange}), [])
   tryMergeSig s importedFrom origMod (v : vs)
     | isNothing v.sig =
         let merged = v {sig = Just s, importedFrom}
