@@ -1,5 +1,5 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Arborist.Renamer (
   renamePrg,
@@ -19,12 +19,12 @@ import Arborist.Scope.Types
 import Control.Error
 import Data.Bifunctor qualified as Bifunctor
 import Data.HashMap.Lazy qualified as Map
+import Data.LineColRange
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Hir.Types qualified as Hir
-import Data.LineColRange
 
 data RenamePhase
 
@@ -36,10 +36,10 @@ data ResolvedVariable
   | NoVarFound
   deriving (Show)
 
-resolvedLocs :: Hir.ModuleText -> ResolvedVariable ->  [(Hir.ModuleText, LineColRange)]
+resolvedLocs :: Hir.ModuleText -> ResolvedVariable -> [(Hir.ModuleText, LineColRange)]
 resolvedLocs thisMod resolvedVar =
   case resolvedVar of
-    ResolvedVariable resolvedVarInfo -> 
+    ResolvedVariable resolvedVarInfo ->
       case resolvedVarInfo of
         ResolvedGlobal glblVarInfo ->
           [(glblVarInfo.originatingMod, glblVarInfo.loc)]

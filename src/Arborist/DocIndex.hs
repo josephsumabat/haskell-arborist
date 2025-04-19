@@ -1,9 +1,8 @@
 module Arborist.DocIndex where
 
-import Arborist.ProgramIndex
-import qualified Data.HashMap.Lazy as Map
-import Hir.Types
 import AST.Haskell
+import Arborist.ProgramIndex
+import Data.HashMap.Lazy qualified as Map
+import Hir.Types
 
 type DocIndex = Map.HashMap ModuleText HaddockP
-

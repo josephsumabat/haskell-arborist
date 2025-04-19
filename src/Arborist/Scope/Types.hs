@@ -3,11 +3,11 @@ module Arborist.Scope.Types where
 import AST
 import AST.Haskell qualified as AST
 import Data.HashMap.Lazy qualified as Map
+import Data.LineColRange
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import Data.LineColRange
 
 data GlblNameInfo = GlblNameInfo
   { name :: T.Text

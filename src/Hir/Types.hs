@@ -10,6 +10,7 @@ import Data.Function (on)
 import Data.Hashable (Hashable (..))
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 data NameSpace
@@ -52,7 +53,10 @@ data ModuleText = ModuleText
   { parts :: NonEmpty Text
   , text :: Text
   }
-  deriving (Show, Ord)
+  deriving (Ord)
+
+instance Show ModuleText where
+  show m = T.unpack m.text
 
 instance Eq ModuleText where
   (==) = (==) `on` (.text)

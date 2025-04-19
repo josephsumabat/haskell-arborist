@@ -27,3 +27,11 @@ makeRelativeMaybe base path = do
   let rel = makeRelative base path
   _ <- guard $ path /= rel
   pure rel
+
+modWithFiles :: [FilePath] -> ModuleText -> [(ModuleText, FilePath)]
+modWithFiles baseDirs modText =
+  filesWithSrc (modText, (moduleToPath ".hs" modText))
+ where
+  filesWithSrc :: (ModuleText, FilePath) -> [(ModuleText, FilePath)]
+  filesWithSrc (modText, noSrcPath) =
+    (\srcDir -> (modText, srcDir </> noSrcPath)) <$> baseDirs

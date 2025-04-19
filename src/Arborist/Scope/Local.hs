@@ -8,13 +8,13 @@ where
 
 import AST
 import Arborist.Scope.Types
+import Control.Error (headMay)
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir
 import Hir.Types qualified as Hir
-import Control.Error (headMay)
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =

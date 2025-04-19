@@ -7,21 +7,23 @@ import Arborist.Scope.Global
 import Control.Error
 import Control.Exception
 import Control.Monad
+import Data.ByteString qualified as BS
 import Data.Foldable
 import Data.HashMap.Lazy qualified as Map
+import Data.Hashable
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Text.Encoding qualified as T
-import Data.ByteString qualified as BS
+import Data.Text.IO qualified as T
 import Debug.Trace
+import GHC.Stack
 import HaskellAnalyzer
 import Hir
+import Hir.Parse
 import Hir.Types
 import Hir.Types qualified as Hir
 import ModUtils
 import System.Directory qualified as Dir
-import System.FilePath qualified as Dir
 
 data ModGraph = ModGraph
   { transitiveImports :: Map.HashMap ModuleText (Set.Set ModuleText)
@@ -61,6 +63,7 @@ indexImport prgs exportIndex modText thisPrg baseDirs = do
 
 -- | Index re-exports transitively, stopping early when all re-exported names are found.
 indexTransitiveReExports ::
+  (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   ModuleText ->
@@ -78,6 +81,7 @@ indexTransitiveReExports prgs exportIndex modText thisPrg baseDirs =
 
 -- | Recursively walk the re-export graph, stopping when all required names are resolved.
 resolveReexports ::
+  (HasCallStack) =>
   -- | Names we still need
   Set.Set T.Text ->
   -- | Indexed programs so far
@@ -96,8 +100,6 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
   | Set.null remaining = pure (prgs, exportIdx)
   | Set.member modText visited = resolveReexports remaining prgs exportIdx visited rest baseDirs
   | otherwise = do
-
-
       -- If we still have missing names, explore imports
       let requiredFilesWithSrc =
             case prg.exports of
@@ -113,14 +115,13 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
       newPrgs <- getPrgs prgs requiredFilesWithSrc
       let prgs' = insertMany newPrgs (Map.insert modText prg prgs)
 
-      -- Export resolution
-      let (exportedNames, exportIdx') = getExportedNames prgs' exportIdx modText
+      -- Export resolution - note we CANNOT use the export index here as we have not resolved children yet
+      let (exportedNames, exportIdx') = getExportedNames prgs' Map.empty modText
           found = Set.fromList (map (.name) exportedNames)
           stillMissing = remaining `Set.difference` found
           visited' = Set.insert modText visited
-      let newPrgsIdx = insertMany newPrgs prgs'
 
-      resolveReexports stillMissing newPrgsIdx exportIdx' visited' (newPrgs ++ rest) baseDirs
+      resolveReexports stillMissing prgs' exportIdx' visited' (newPrgs ++ rest) baseDirs
 
 getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO [(ModuleText, Hir.Program)]
 getPrgs prgs hsFiles = do
@@ -141,7 +142,7 @@ getPrgs prgs hsFiles = do
         Just prg -> pure $ Just [(modText, prg)]
   pure foundPrgs
 
-insertMany :: [(ModuleText, Hir.Program)] -> ProgramIndex -> ProgramIndex
+insertMany :: (Hashable a) => [(a, b)] -> Map.HashMap a b -> Map.HashMap a b
 insertMany toInsert prgs =
   foldl'
     (\prgMap (modText, prg) -> Map.insert modText prg prgMap)
@@ -152,14 +153,6 @@ safeReadFile :: FilePath -> IO (Maybe T.Text)
 safeReadFile path = do
   result <- try (T.readFile path) :: IO (Either SomeException T.Text)
   pure $ either (const Nothing) Just result
-
-modWithFiles :: [FilePath] -> ModuleText -> [(ModuleText, FilePath)]
-modWithFiles baseDirs modText =
-  filesWithSrc (modText, (moduleToPath ".hs" modText))
- where
-  filesWithSrc :: (ModuleText, FilePath) -> [(ModuleText, FilePath)]
-  filesWithSrc (modText, noSrcPath) =
-    (\srcDir -> (modText, srcDir Dir.</> noSrcPath)) <$> baseDirs
 
 -- Unoptimized
 indexTransitiveReExportsOld :: ProgramIndex -> ModuleText -> Hir.Program -> [FilePath] -> IO ProgramIndex

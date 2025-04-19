@@ -9,7 +9,9 @@ import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Debug.Trace
+import GHC.Stack
 import Hir
+import Hir.Parse
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
 
@@ -64,7 +66,7 @@ declToNameInfo originatingMod importedFrom qualified decl =
     }
 
 -- Public API wrappers
-getExportedNames :: ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedName], ExportIndex)
+getExportedNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedName], ExportIndex)
 getExportedNames prgIdx exportIdx modName =
   getExportedNames' prgIdx exportIdx Set.empty modName
 
@@ -72,12 +74,13 @@ getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblNameI
 getManyImportNames prgIdx exportIdx imps =
   getManyImportNames' prgIdx exportIdx Set.empty imps
 
-getImportNames :: ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblNameInfo], ExportIndex)
+getImportNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblNameInfo], ExportIndex)
 getImportNames prgIdx exportIdx imp =
   getImportNames' prgIdx exportIdx Set.empty imp
 
 -- Internal cycle-safe versions
 getImportNames' ::
+  (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
@@ -96,6 +99,7 @@ getImportNames' prgIndex exportIndex inProgress thisImport =
    in (importList, updatedExportIndex)
 
 getManyImportNames' ::
+  (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
@@ -118,6 +122,7 @@ getTransitiveReExports prg exports =
    in exportNamesSet `Set.difference` declaredNamesSet
 
 getExportedNames' ::
+  (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
@@ -129,14 +134,14 @@ getExportedNames' prgIndex exportIndex inProgress modName
   | Just prg <- Map.lookup modName prgIndex = getExportedNamesFromPrg prg
   | otherwise = ([], exportIndex)
  where
-  getExportedNamesFromPrg :: Hir.Program -> ([ExportedName], ExportIndex)
+  getExportedNamesFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedName], ExportIndex)
   getExportedNamesFromPrg prg =
     let declaredNames = getDeclaredNames modName prg
         inProgress' = Set.insert modName inProgress
      in case prg.exports of
           Nothing ->
-              let exportIdxWithSelf = Map.insert modName declaredNames exportIndex in
-             (declaredNames, exportIdxWithSelf)
+            let exportIdxWithSelf = Map.insert modName declaredNames exportIndex
+             in (declaredNames, exportIdxWithSelf)
           Just exportLst ->
             let
               exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exportLst
@@ -152,18 +157,27 @@ getExportedNames' prgIndex exportIndex inProgress modName
 
               transitiveReexportNamesInfo =
                 filter
-                  (\expInfo ->
-                    expInfo.name `Set.member` exportNamesSet
-                      || expInfo.importedFrom `Set.member` reExportedMods
+                  ( \expInfo ->
+                      expInfo.name `Set.member` exportNamesSet
+                        || expInfo.importedFrom `Set.member` reExportedMods
+                  )
+                  allImportedNames
+
+              moduleExports =
+                filter
+                  ( \expInfo ->
+                      expInfo.importedFrom `Set.member` reExportedMods
                   )
                   allImportedNames
 
               exportedNames =
-                (infoToExport <$> transitiveReexportNamesInfo)
+                (infoToExport <$> moduleExports)
+                  <> (infoToExport <$> transitiveReexportNamesInfo)
                   <> filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
 
               updateExportIdxWithSelf = Map.insert modName exportedNames updatedExportIdx
-             in (exportedNames, updateExportIdxWithSelf)
+             in
+              (exportedNames, updateExportIdxWithSelf)
 
 getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedName]
 getDeclaredNames mod prg =
@@ -208,7 +222,7 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
     (Just (GlblVarInfo {sig = Nothing, binds = [b], importedFrom, originatingMod = origMod, name = b.name, loc = (AST.getDynNode b.node).nodeLineColRange}), [])
   tryMergeBind b importedFrom origMod (v : vs)
     | null v.binds =
-      let merged = v {binds = [b], loc = (AST.getDynNode b.node).nodeLineColRange, importedFrom}
+        let merged = v {binds = [b], loc = (AST.getDynNode b.node).nodeLineColRange, importedFrom}
          in (Just merged, vs)
     | otherwise =
         let (result, rest) = tryMergeBind b importedFrom origMod vs
