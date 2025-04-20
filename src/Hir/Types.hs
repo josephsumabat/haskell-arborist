@@ -30,7 +30,7 @@ data Name = Name
   }
 
 data NameShow = NameShow {name :: Text, node :: DynNode}
-  deriving (Show)
+  deriving (Show, Eq)
 
 instance Show Name where
   show Name {node} = show NameShow {name = AST.nodeToText node, node}
@@ -79,14 +79,14 @@ instance Hashable ModuleName where
 data ImportChildren
   = ImportAllChildren
   | ImportChild NameSpace Name
-  deriving (Show)
+  deriving (Show, Eq)
 
 data ImportItem = ImportItem
   { namespace :: NameSpace
   , name :: Name
   , children :: [ImportChildren]
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data ExportChildren
   = ExportAllChildren
@@ -118,7 +118,7 @@ data Import = Import
   , hiding :: !Bool
   , importList :: [ImportItem]
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 pattern OpenImport :: ModuleText -> Import
 pattern OpenImport mod = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = []}
@@ -138,13 +138,13 @@ data DataDecl = DataDecl
   { name :: Name
   , node :: H.DataTypeP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data ClassDecl = ClassDecl
   { name :: Name
   , node :: H.ClassP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data BindDecl = BindDecl
   { name :: Name
@@ -160,37 +160,37 @@ data SigDecl = SigDecl
 
 data DataFamilyDecl = DataFamilyDecl
   {name :: Name, node :: H.DataFamilyP}
-  deriving (Show)
+  deriving (Show, Eq)
 
 data NewtypeDecl = NewtypeDecl
   { name :: Name
   , node :: H.NewtypeP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data PatternSigDecl = PatternSigDecl
   { name :: Name
   , node :: H.SignatureP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data PatternDecl = PatternDecl
   { name :: Name
   , node :: H.EquationP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data TypeFamilyDecl = TypeFamilyDecl
   { name :: Name
   , node :: H.TypeFamilyP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data TypeSynonymDecl = TypeSynonymDecl
   { name :: Name
   , node :: H.TypeSynomymP
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Decl
   = DeclData DataDecl
@@ -203,7 +203,7 @@ data Decl
   | DeclPattern PatternDecl
   | DeclTypeFamily TypeFamilyDecl
   | DeclTypeSynonym TypeSynonymDecl
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Program = Program
   { mod :: Maybe ModuleText
@@ -212,7 +212,7 @@ data Program = Program
   , decls :: [Decl]
   , dynNode :: DynNode
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 type GetNameTypes =
   Haskell.NameP
@@ -232,18 +232,18 @@ data FunctionBind = FunctionBind
   { fnName :: Text
   , params :: [Param]
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Params = Params
   { params :: [Param]
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Param
   = ParamVar Variable
   | ParamWildcard
   | ParamOther
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Pattern = Pattern
   { patVars :: [Variable]

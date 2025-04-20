@@ -119,7 +119,7 @@ main = do
     target <- head <$> lazyGetPrgs ["../mercury-web-backend/src/Mobile/Push.hs"]
     (requiredPrograms, exportIdx) <- time "gather" $ gatherScopeDeps target src
     let modText = parseModuleTextFromText "Mobile.AppLink"
-    let renameTree = renamePrg requiredPrograms exportIdx target
+    let renameTree = renamePrg requiredPrograms Map.empty target
     let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renameTree
     let loc = point (LineCol (mkPos 87) (mkPos 29))
     let chosenNode = (getDeepestContainingLineCol @(AST.Variable RenamePhase) loc) . (.dynNode) =<< renameTree

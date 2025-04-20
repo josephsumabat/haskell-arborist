@@ -17,7 +17,7 @@ data GlblNameInfo = GlblNameInfo
   , importedFrom :: ModuleText
   , requiresQualifier :: Bool
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data VarType
   = VarSig Hir.SigDecl
@@ -31,7 +31,7 @@ data GlblVarInfo = GlblVarInfo
   , loc :: LineColRange
   , name :: Hir.Name
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 data LocalVarInfo
   = -- | FnArg
