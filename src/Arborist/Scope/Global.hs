@@ -1,6 +1,7 @@
 module Arborist.Scope.Global where
 
 import AST
+import Data.Set.NonEmpty qualified as NES
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
 import Data.HashMap.Lazy qualified as Map
@@ -14,6 +15,7 @@ import Hir
 import Hir.Parse
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import qualified Data.List.NonEmpty as NE
 
 data ExportedName = ExportedName
   { name :: T.Text
@@ -170,10 +172,17 @@ getExportedNames' prgIndex exportIndex inProgress modName
                   )
                   allImportedNames
 
+              selfExports =
+                if modName `Set.member` reExportedMods
+                   then
+                    declaredNames
+                   else
+                    filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
+
               exportedNames =
                 (infoToExport <$> moduleExports)
                   <> (infoToExport <$> transitiveReexportNamesInfo)
-                  <> filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
+                  <> selfExports
 
               updateExportIdxWithSelf = Map.insert modName exportedNames updatedExportIdx
              in
@@ -209,8 +218,8 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
         existing = Map.findWithDefault [] moduleKey modMap
 
         (newEntry, rest) = case availName.decl of
-          Hir.DeclBind b -> tryMergeBind b importedMod originatingMod existing
-          Hir.DeclSig s -> tryMergeSig s importedMod originatingMod existing
+          Hir.DeclBind b -> tryMergeBind b availName.requiresQualifier importedMod originatingMod existing
+          Hir.DeclSig s -> tryMergeSig s availName.requiresQualifier importedMod originatingMod existing
           _ -> (Nothing, existing)
 
         updatedModMap = Map.insert importedMod (maybeToList newEntry ++ rest) modMap
@@ -227,25 +236,26 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
     b1.name.node.nodeText == b2.name.node.nodeText
       && (AST.getDynNode b1.node).nodeText == (AST.getDynNode b2.node).nodeText
 
-  tryMergeSig :: Hir.SigDecl -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
-  tryMergeSig s importedFrom origMod [] =
+  tryMergeSig :: Hir.SigDecl -> Bool -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeSig s requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
           { sig = Just s
           , binds = []
-          , importedFrom
+          , importedFrom = NES.singleton importedFrom
           , originatingMod = origMod
           , name = s.name
           , loc = (AST.getDynNode s.node).nodeLineColRange
+          , requiresQualifier
           }
     , []
     )
-  tryMergeSig s importedFrom origMod (v : vs)
+  tryMergeSig s requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
-        && v.name.node.nodeText == s.name.node.nodeText =
+    && v.name == s.name && requiresQualifier == v.requiresQualifier =
         case v.sig of
           Nothing ->
-            let merged = v {sig = Just s, importedFrom}
+            let merged = v {sig = Just s, importedFrom = NES.insert importedFrom v.importedFrom, requiresQualifier}
              in (Just merged, vs)
           Just existingSig
             | equalSig existingSig s ->
@@ -253,31 +263,32 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
                 (Nothing, v : vs)
             | otherwise ->
                 -- Different sig, preserve both
-                let (result, rest) = tryMergeSig s importedFrom origMod vs
+                let (result, rest) = tryMergeSig s requiresQualifier importedFrom origMod vs
                  in (result, v : rest)
     | otherwise =
-        let (result, rest) = tryMergeSig s importedFrom origMod vs
+        let (result, rest) = tryMergeSig s requiresQualifier importedFrom origMod vs
          in (result, v : rest)
 
-  tryMergeBind :: Hir.BindDecl -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
-  tryMergeBind b importedFrom origMod [] =
+  tryMergeBind :: Hir.BindDecl -> Bool -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeBind b requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
           { sig = Nothing
           , binds = [b]
-          , importedFrom
+          , importedFrom = NES.singleton importedFrom
           , originatingMod = origMod
           , name = b.name
           , loc = (AST.getDynNode b.node).nodeLineColRange
+          , requiresQualifier
           }
     , []
     )
-  tryMergeBind b importedFrom origMod (v : vs)
+  tryMergeBind b requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
-        && v.name.node.nodeText == b.name.node.nodeText =
+    && v.name == b.name  && requiresQualifier == v.requiresQualifier =
         case v.binds of
           [] ->
-            let merged = v {binds = [b], importedFrom, loc = (AST.getDynNode b.node).nodeLineColRange}
+            let merged = v {binds = [b], importedFrom = NES.insert importedFrom  v.importedFrom, loc = (AST.getDynNode b.node).nodeLineColRange}
              in (Just merged, vs)
           [existingBind]
             | equalBind existingBind b ->
@@ -285,8 +296,8 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
                 (Nothing, v : vs)
           _ ->
             -- Different or multiple binds, keep both
-            let (result, rest) = tryMergeBind b importedFrom origMod vs
+            let (result, rest) = tryMergeBind b requiresQualifier importedFrom origMod vs
              in (result, v : rest)
     | otherwise =
-        let (result, rest) = tryMergeBind b importedFrom origMod vs
+        let (result, rest) = tryMergeBind b requiresQualifier importedFrom origMod vs
          in (result, v : rest)

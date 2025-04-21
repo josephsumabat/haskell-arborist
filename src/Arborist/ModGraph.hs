@@ -24,6 +24,7 @@ import Hir.Types
 import Hir.Types qualified as Hir
 import ModUtils
 import System.Directory qualified as Dir
+import qualified Data.List as List
 
 data ModGraph = ModGraph
   { transitiveImports :: Map.HashMap ModuleText (Set.Set ModuleText)
@@ -33,8 +34,9 @@ data ModGraph = ModGraph
 
 gatherScopeDeps :: Hir.Program -> [FilePath] -> IO (ProgramIndex, ExportIndex)
 gatherScopeDeps thisPrg baseDirs = do
-  res <- indexImports Map.empty thisPrg baseDirs
-  pure res
+  (prgs, exports) <- indexImports Map.empty thisPrg baseDirs
+  let prgsWithSelf = fromMaybe prgs ((\mod -> Map.insert mod thisPrg prgs) <$> thisPrg.mod)
+  pure (prgsWithSelf, exports)
 
 indexImports ::
   ProgramIndex ->
@@ -44,15 +46,16 @@ indexImports ::
 indexImports prgs thisPrg baseDirs = do
   let requiredFilesWithSrc =
         thisPrg.imports >>= (modWithFiles baseDirs) . (.mod)
-  importedPrgs <- getPrgs prgs requiredFilesWithSrc
+  (importedPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
   allPrgs <-
     foldl'
       ( \currIdxsM (modText, prg) -> do
           (currPrgs, currExports) <- currIdxsM
           indexImport currPrgs currExports modText prg baseDirs
       )
-      (pure (prgs, Map.empty))
+      (pure (prgs', Map.empty))
       importedPrgs
+
   pure allPrgs
 
 indexImport :: ProgramIndex -> ExportIndex -> ModuleText -> Hir.Program -> [FilePath] -> IO (ProgramIndex, ExportIndex)
@@ -79,7 +82,6 @@ indexTransitiveReExports prgs exportIndex modText thisPrg baseDirs =
       let transitiveReExports = getTransitiveReExports thisPrg exports
       resolveReexports transitiveReExports prgs exportIndex Set.empty [(modText, thisPrg)] baseDirs
 
--- | Recursively walk the re-export graph, stopping when all required names are resolved.
 resolveReexports ::
   (HasCallStack) =>
   -- | Names we still need
@@ -100,6 +102,8 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
   | Set.null remaining = pure (prgs, exportIdx)
   | Set.member modText visited = resolveReexports remaining prgs exportIdx visited rest baseDirs
   | otherwise = do
+      let visited' = Set.insert modText visited
+
       -- If we still have missing names, explore imports
       let requiredFilesWithSrc =
             case prg.exports of
@@ -112,35 +116,57 @@ resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDi
                       then exportedMods >>= modWithFiles baseDirs
                       else allImportMods >>= modWithFiles baseDirs
 
-      newPrgs <- getPrgs prgs requiredFilesWithSrc
-      let prgs' = insertMany newPrgs (Map.insert modText prg prgs)
+      (newPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
 
       -- Export resolution - note we CANNOT use the export index here as we have not resolved children yet
       let (exportedNames, exportIdx') = getExportedNames prgs' Map.empty modText
           found = Set.fromList (map (.name) exportedNames)
           stillMissing = remaining `Set.difference` found
-          visited' = Set.insert modText visited
 
-      resolveReexports stillMissing prgs' exportIdx' visited' (newPrgs ++ rest) baseDirs
+      -- PRUNING: If this module doesn’t export anything we need, skip it
+      if Set.null (remaining `Set.intersection` found)
+        then resolveReexports remaining prgs' exportIdx visited' rest baseDirs
+        else do
+          -- Rebuild the worklist to include all reachable modules
+          let loadedMods =
+                foldr (\(modText', _) acc ->
+                         case Map.lookup modText' prgs' of
+                           Just prg'
+                             | not (Set.member modText' visited') ->
+                                 (modText', prg') : acc
+                           _ -> acc)
+                      []
+                      requiredFilesWithSrc
 
-getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO [(ModuleText, Hir.Program)]
-getPrgs prgs hsFiles = do
-  foundPrgs <- fmap (join . catMaybes) $
-    forM hsFiles $ \(modText, file) -> do
-      let mFound = Map.lookup modText prgs
-      case mFound of
-        Nothing -> do
-          fileExists <-
-            Dir.doesFileExist file
+          resolveReexports stillMissing prgs' exportIdx' visited' (newPrgs ++ rest) baseDirs
+
+getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Program)], ProgramIndex)
+getPrgs prgs hsFiles =
+    foldM step ([], Set.empty, prgs) hsFiles >>= \(newModules, _, updatedMap) -> do
+    --traceShowM $ "getPrgs finished with " <> show (length newModules) <> " new modules"
+    pure (newModules, updatedMap)
+  where
+    step :: ([(ModuleText, Program)], Set.Set ModuleText, ProgramIndex)
+            -> (ModuleText, FilePath)
+            -> IO ([(ModuleText, Program)], Set.Set ModuleText, ProgramIndex)
+    step (!parsedList, !seen, !prgIndex) (modText, file) =
+      case (Map.lookup modText prgIndex, Set.member modText seen) of
+        (_, True) -> pure (parsedList, seen, prgIndex)
+        (Just prg, False) -> do
+          let !parsedList' = (modText, prg) : parsedList
+          pure (parsedList', Set.insert modText seen, prgIndex)
+        (Nothing, False) -> do
+          fileExists <- Dir.doesFileExist file
           if fileExists
             then do
-              -- traceShowM $ "Parsing " <> file
-              fileContents <- fmap T.decodeUtf8 . BS.readFile $ file
-              let (_src, prg) = parsePrg fileContents
-              pure $ Just [(modText, prg)]
-            else pure Nothing
-        Just prg -> pure $ Just [(modText, prg)]
-  pure foundPrgs
+              fileContents <- T.decodeUtf8 <$> BS.readFile file
+              let (_src, !prg) = parsePrg fileContents
+                  !parsedList' = (modText, prg) : parsedList
+                  !nextSeen = Set.insert modText seen
+                  !nextPrgIndex = Map.insert modText prg prgIndex
+              pure (parsedList', nextSeen, nextPrgIndex)
+            else do
+              pure (parsedList, seen, prgIndex)
 
 insertMany :: (Hashable a) => [(a, b)] -> Map.HashMap a b -> Map.HashMap a b
 insertMany toInsert prgs =
@@ -167,8 +193,7 @@ indexTransitiveReExportsOld prgs modText thisPrg baseDirs = do
             if null transitiveReExports
               then exportedMods >>= (modWithFiles baseDirs)
               else allImportMods >>= (modWithFiles baseDirs)
-      directExportPrgs <- getPrgs prgs requiredFilesWithSrc
-      let prgsWithExports = insertMany directExportPrgs prgs
+      (directExportPrgs, prgsWithExports) <- getPrgs prgs requiredFilesWithSrc
       reachablePrgs <-
         foldl'
           ( \currPrgsM (modText, prg) -> do
@@ -187,3 +212,12 @@ indexTransitiveReExportsOld prgs modText thisPrg baseDirs = do
   getMod :: Hir.ExportItem -> Maybe Hir.ModuleName
   getMod (Hir.ExportModuleItem m) = Just m
   getMod (Hir.ExportItem {}) = Nothing
+
+nubByKey :: (Ord k) => (a -> k) -> [a] -> [a]
+nubByKey toKey = go Set.empty
+  where
+    go _ [] = []
+    go !seen (x:xs)
+      | Set.member k seen = go seen xs
+      | otherwise = x : go (Set.insert k seen) xs
+      where k = toKey x

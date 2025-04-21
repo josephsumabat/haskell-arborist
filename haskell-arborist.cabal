@@ -96,6 +96,7 @@ library
     , hashable
     , haskell-ast
     , lens
+    , nonempty-containers
     , optics
     , pretty-simple
     , text
@@ -153,6 +154,7 @@ executable haskell-arborist
     , haskell-arborist
     , haskell-ast
     , lens
+    , nonempty-containers
     , optics
     , pretty-simple
     , text
@@ -212,6 +214,7 @@ test-suite haskell-arborist-test
     , haskell-ast
     , hspec ==2.*
     , lens
+    , nonempty-containers
     , optics
     , pretty-simple
     , text
