@@ -15,6 +15,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir
 import Hir.Types qualified as Hir
+import Debug.Trace
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =

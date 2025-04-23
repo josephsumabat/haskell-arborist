@@ -38,6 +38,15 @@ getScope availPrgs exportIdx n !scopeStack =
                   Nothing -> scopeWithParams : scopeStack
                   Just localBinds -> addLocalWhereBinds scopeWithParams (Hir.parseLocalBinds localBinds) : scopeStack
            in scopeWithBinds
+        Just (AST.Inj @(AST.BindP) bindNode) ->
+          -- Add local params when encountering a function node
+          let mWhereBinds = (eitherToMaybe $ AST.unwrap bindNode) >>= (.binds)
+              curScope = fromMaybe emptyScope (headMay scopeStack)
+              scopeWithBinds =
+                case mWhereBinds of
+                  Nothing -> scopeStack
+                  Just localBinds -> addLocalWhereBinds curScope (Hir.parseLocalBinds localBinds) : scopeStack
+           in scopeWithBinds
         Just (AST.Inj @(AST.LetInP) letInNode) ->
           let mLocalBinds = (eitherToMaybe $ AST.unwrap letInNode) >>= (.binds)
            in case mLocalBinds of
