@@ -32,9 +32,9 @@ data ModGraph = ModGraph
   -- e.g. any module that has an observable name
   }
 
-gatherScopeDeps :: Hir.Program -> [FilePath] -> IO (ProgramIndex, ExportIndex)
-gatherScopeDeps thisPrg baseDirs = do
-  (prgs, exports) <- indexImports Map.empty thisPrg baseDirs
+gatherScopeDeps :: Hir.Program -> [FilePath] -> Maybe Int -> IO (ProgramIndex, ExportIndex)
+gatherScopeDeps thisPrg baseDirs maxDepth = do
+  (prgs, exports) <- indexImports Map.empty thisPrg baseDirs maxDepth
   let prgsWithSelf = fromMaybe prgs ((\mod -> Map.insert mod thisPrg prgs) <$> thisPrg.mod)
   pure (prgsWithSelf, exports)
 
@@ -42,27 +42,29 @@ indexImports ::
   ProgramIndex ->
   Hir.Program ->
   [FilePath] ->
+  Maybe Int ->
   IO (ProgramIndex, ExportIndex)
-indexImports prgs thisPrg baseDirs = do
+indexImports prgs thisPrg baseDirs maxDepth = do
   let requiredFilesWithSrc =
         thisPrg.imports >>= (modWithFiles baseDirs) . (.mod)
+  traceShowM thisPrg.mod
   (importedPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
   allPrgs <-
     foldl'
       ( \currIdxsM (modText, prg) -> do
           (currPrgs, currExports) <- currIdxsM
-          indexImport currPrgs currExports modText prg baseDirs
+          indexImport currPrgs currExports modText prg baseDirs maxDepth
       )
       (pure (prgs', Map.empty))
       importedPrgs
 
   pure allPrgs
 
-indexImport :: ProgramIndex -> ExportIndex -> ModuleText -> Hir.Program -> [FilePath] -> IO (ProgramIndex, ExportIndex)
-indexImport prgs exportIndex modText thisPrg baseDirs = do
+indexImport :: ProgramIndex -> ExportIndex -> ModuleText -> Hir.Program -> [FilePath] -> Maybe Int -> IO (ProgramIndex, ExportIndex)
+indexImport prgs exportIndex modText thisPrg baseDirs maxDepth = do
   let addImports = Map.insert modText thisPrg prgs
    in -- indexTransitiveReExports addImports modText thisPrg baseDirs
-      indexTransitiveReExports addImports exportIndex modText thisPrg baseDirs
+      indexTransitiveReExports addImports exportIndex modText thisPrg baseDirs maxDepth
 
 -- | Index re-exports transitively, stopping early when all re-exported names are found.
 indexTransitiveReExports ::
@@ -72,73 +74,81 @@ indexTransitiveReExports ::
   ModuleText ->
   Hir.Program ->
   [FilePath] ->
+  Maybe Int ->
   IO (ProgramIndex, ExportIndex)
-indexTransitiveReExports prgs exportIndex modText thisPrg baseDirs =
+indexTransitiveReExports prgs exportIndex modText thisPrg baseDirs maxDepth =
   case thisPrg.exports of
     Nothing ->
       let (_, exportedIndex) = getExportedNames prgs exportIndex modText
        in pure (prgs, exportedIndex)
     Just exports -> do
       let transitiveReExports = getTransitiveReExports thisPrg exports
-      resolveReexports transitiveReExports prgs exportIndex Set.empty [(modText, thisPrg)] baseDirs
+      traceM $ "indexing " <> (show modText)
+      resolveReexports transitiveReExports prgs exportIndex Set.empty Set.empty [(modText, thisPrg, 0)] baseDirs maxDepth
 
 resolveReexports ::
   (HasCallStack) =>
-  -- | Names we still need
-  Set.Set T.Text ->
-  -- | Indexed programs so far
+  Set.Set T.Text ->                     -- remaining names
   ProgramIndex ->
-  -- | Cached export info
   ExportIndex ->
-  -- | Visited modules (avoid cycles)
-  Set.Set ModuleText ->
-  -- | Worklist
-  [(ModuleText, Hir.Program)] ->
-  -- | Base dirs
-  [FilePath] ->
+  Set.Set ModuleText ->                 -- visited modules
+  Set.Set ModuleText ->                 -- walked reexports
+  [(ModuleText, Hir.Program, Int)] ->   -- worklist (with per-module depth)
+  [FilePath] ->                         -- base directories to check for haskell files
+  Maybe Int ->                          -- max depth
   IO (ProgramIndex, ExportIndex)
-resolveReexports _remaining prgs exportIdx _visited [] _ = pure (prgs, exportIdx)
-resolveReexports remaining prgs exportIdx visited ((modText, prg) : rest) baseDirs
-  | Set.null remaining = pure (prgs, exportIdx)
-  | Set.member modText visited = resolveReexports remaining prgs exportIdx visited rest baseDirs
+resolveReexports _remaining prgs exportIdx _visited _walked [] _ _ =
+  pure (prgs, exportIdx)
+
+resolveReexports remaining prgs exportIdx visited walkedReexports ((modText, prg, depth) : rest) baseDirs maxDepth
+  | Set.member modText visited =
+      resolveReexports remaining prgs exportIdx visited walkedReexports rest baseDirs maxDepth
+
+  | Just maxD <- maxDepth, depth > maxD =
+      resolveReexports remaining prgs exportIdx visited walkedReexports rest baseDirs maxDepth
+
   | otherwise = do
       let visited' = Set.insert modText visited
 
-      -- If we still have missing names, explore imports
-      let requiredFilesWithSrc =
+      -- Determine dependencies
+      let (reexportedMods, requiredModules) =
             case prg.exports of
-              Nothing -> []
+              Nothing -> ([], (.mod) <$> prg.imports)
               Just exports ->
                 let exportedMods = (.mod) <$> exportItemMods exports
                     allImportMods = (.mod) <$> prg.imports
-                    transitiveReExports = getTransitiveReExports prg exports
-                 in if null transitiveReExports
-                      then exportedMods >>= modWithFiles baseDirs
-                      else allImportMods >>= modWithFiles baseDirs
+                    transitiveNames = getTransitiveReExports prg exports
+                    req =
+                      if Set.null transitiveNames
+                        then exportedMods
+                        else allImportMods
+                 in (exportedMods, req)
 
+      let requiredFilesWithSrc = requiredModules >>= modWithFiles baseDirs
+
+      -- Parse required modules
       (newPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
 
-      -- Export resolution - note we CANNOT use the export index here as we have not resolved children yet
-      let (exportedNames, exportIdx') = getExportedNames prgs' Map.empty modText
+      let (exportedNames, exportIdx') = getExportedNames prgs' exportIdx modText
           found = Set.fromList (map (.name) exportedNames)
           stillMissing = remaining `Set.difference` found
 
-      -- PRUNING: If this module doesn’t export anything we need, skip it
-      if Set.null (remaining `Set.intersection` found)
-        then resolveReexports remaining prgs' exportIdx visited' rest baseDirs
-        else do
-          -- Rebuild the worklist to include all reachable modules
-          let loadedMods =
-                foldr (\(modText', _) acc ->
-                         case Map.lookup modText' prgs' of
-                           Just prg'
-                             | not (Set.member modText' visited') ->
-                                 (modText', prg') : acc
-                           _ -> acc)
-                      []
-                      requiredFilesWithSrc
+      let unwalkedReexports = filter (\m -> not (Set.member m walkedReexports)) reexportedMods
+          canPrune = Set.null (remaining `Set.intersection` found) && null unwalkedReexports
 
-          resolveReexports stillMissing prgs' exportIdx' visited' (newPrgs ++ rest) baseDirs
+      if canPrune
+        then resolveReexports remaining prgs' exportIdx visited' walkedReexports rest baseDirs maxDepth
+        else do
+          let walkedReexports' = Set.union walkedReexports (Set.fromList reexportedMods)
+
+          -- Construct per-module-depth worklist
+          let newWork =
+                [ (modText', prg', depth + 1)
+                | (modText', prg') <- newPrgs
+                , not (Set.member modText' visited')
+                ]
+
+          resolveReexports stillMissing prgs' exportIdx' visited' walkedReexports' (newWork ++ rest) baseDirs maxDepth
 
 getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Program)], ProgramIndex)
 getPrgs prgs hsFiles =
@@ -159,6 +169,7 @@ getPrgs prgs hsFiles =
           fileExists <- Dir.doesFileExist file
           if fileExists
             then do
+              traceShowM $ "Parsing " <> file
               fileContents <- T.decodeUtf8 <$> BS.readFile file
               let (_src, !prg) = parsePrg fileContents
                   !parsedList' = (modText, prg) : parsedList
