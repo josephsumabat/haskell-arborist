@@ -6,11 +6,17 @@ import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types
 import System.FilePath
+import qualified Data.HashMap.Lazy as Map
+import System.Directory (doesDirectoryExist, listDirectory)
 
 pathToModule :: [Path.AbsPath] -> Path.AbsPath -> Maybe ModuleText
 pathToModule srcDirs absPath = do
   let fp = Path.toFilePath absPath
-  modPath <- msum ((\srcDir -> makeRelativeMaybe (Path.toFilePath srcDir) fp) <$> srcDirs)
+  unsafePathToModule (Path.toFilePath <$> srcDirs) fp
+  
+unsafePathToModule :: [FilePath] -> FilePath -> Maybe ModuleText
+unsafePathToModule srcDirs fp = do
+  modPath <- msum ((\srcDir -> makeRelativeMaybe srcDir fp) <$> srcDirs)
   let (modPathWithoutExt, ext) = splitExtension modPath
   guard $ ext == ".hs"
   let modText = T.replace (T.pack [pathSeparator]) "." (T.pack modPathWithoutExt)

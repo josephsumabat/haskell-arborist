@@ -972,6 +972,7 @@ main = do
     let targetFile = ["../mercury-web-backend/src/Handler/Security.hs"]
         targetMod = "Handler.Security"
     let src = srcWithLps
+    modFileMap <- buildModuleFileMap srcWithLps
 
     hsFiles <- getAllHsFiles src
     -- mapM_ putStrLn hsFiles
@@ -980,14 +981,15 @@ main = do
     justTarget <- lazyGetPrgs targetFile
     let Just target = Map.lookup (parseModuleTextFromText targetMod) justTarget
     (requiredPrograms, exportIdx) <- time "gather" $ gatherScopeDeps target src (Just 1) 
-    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Handler.Util")
+    let exportIdx2 = getExportedNames allPrgs Map.empty (parseModuleTextFromText "Handler.Util")
     --let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     --let renameTree = renamePrg allPrgs Map.empty target
     let renameTree = renamePrg requiredPrograms Map.empty target
     let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renameTree
     let loc = point (LineCol (mkPos 87) (mkPos 29))
     let chosenNode = (getDeepestContainingLineCol @(AST.Variable RenamePhase) loc) . (.dynNode) =<< renameTree
-    -- traceShowM (Map.keys requiredPrograms)
+    --traceShowM (length (Map.keys requiredPrograms))
+    --traceShowM (length (Map.keys allPrgs))
     --traceM $ Text.unpack . pShowNoColor $ (fst exportIdx2)
     --traceM $ Text.unpack . pShowNoColor $ availableNamesToScope $ (filter (\g -> g.originatingMod == parseModuleTextFromText "Import.Handler") glblAvail)
 

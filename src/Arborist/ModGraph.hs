@@ -82,36 +82,29 @@ indexTransitiveReExports prgs exportIndex modText thisPrg baseDirs maxDepth =
       let (_, exportedIndex) = getExportedNames prgs exportIndex modText
        in pure (prgs, exportedIndex)
     Just exports -> do
-      let transitiveReExports = getTransitiveReExports thisPrg exports
       traceM $ "indexing " <> (show modText)
-      resolveReexports transitiveReExports prgs exportIndex Set.empty Set.empty [(modText, thisPrg, 0)] baseDirs maxDepth
+      resolveReexports prgs Set.empty [(modText, thisPrg, 0)] baseDirs maxDepth
 
 resolveReexports ::
   (HasCallStack) =>
-  Set.Set T.Text ->                     -- remaining names
   ProgramIndex ->
-  ExportIndex ->
-  Set.Set ModuleText ->                 -- visited modules
   Set.Set ModuleText ->                 -- walked reexports
   [(ModuleText, Hir.Program, Int)] ->   -- worklist (with per-module depth)
   [FilePath] ->                         -- base directories to check for haskell files
   Maybe Int ->                          -- max depth
   IO (ProgramIndex, ExportIndex)
-resolveReexports _remaining prgs exportIdx _visited _walked [] _ _ =
-  pure (prgs, exportIdx)
+resolveReexports prgs _visited [] _ _ =
+  pure (prgs, Map.empty)
 
-resolveReexports remaining prgs exportIdx visited walkedReexports ((modText, prg, depth) : rest) baseDirs maxDepth
-  | Set.member modText visited =
-      resolveReexports remaining prgs exportIdx visited walkedReexports rest baseDirs maxDepth
-
+resolveReexports prgs visited ((modText, prg, depth) : rest) baseDirs maxDepth
   | Just maxD <- maxDepth, depth > maxD =
-      resolveReexports remaining prgs exportIdx visited walkedReexports rest baseDirs maxDepth
+      resolveReexports prgs visited rest baseDirs maxDepth
 
   | otherwise = do
       let visited' = Set.insert modText visited
 
       -- Determine dependencies
-      let (reexportedMods, requiredModules) =
+      let (_reexportedMods, requiredModules) =
             case prg.exports of
               Nothing -> ([], (.mod) <$> prg.imports)
               Just exports ->
@@ -128,27 +121,13 @@ resolveReexports remaining prgs exportIdx visited walkedReexports ((modText, prg
 
       -- Parse required modules
       (newPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
-
-      let (exportedNames, exportIdx') = getExportedNames prgs' exportIdx modText
-          found = Set.fromList (map (.name) exportedNames)
-          stillMissing = remaining `Set.difference` found
-
-      let unwalkedReexports = filter (\m -> not (Set.member m walkedReexports)) reexportedMods
-          canPrune = Set.null (remaining `Set.intersection` found) && null unwalkedReexports
-
-      if canPrune
-        then resolveReexports remaining prgs' exportIdx visited' walkedReexports rest baseDirs maxDepth
-        else do
-          let walkedReexports' = Set.union walkedReexports (Set.fromList reexportedMods)
-
-          -- Construct per-module-depth worklist
-          let newWork =
+      let newWork =
                 [ (modText', prg', depth + 1)
                 | (modText', prg') <- newPrgs
                 , not (Set.member modText' visited')
                 ]
 
-          resolveReexports stillMissing prgs' exportIdx' visited' walkedReexports' (newWork ++ rest) baseDirs maxDepth
+      resolveReexports prgs' visited' (newWork ++ rest) baseDirs maxDepth
 
 getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Program)], ProgramIndex)
 getPrgs prgs hsFiles =
@@ -181,10 +160,7 @@ getPrgs prgs hsFiles =
 
 insertMany :: (Hashable a) => [(a, b)] -> Map.HashMap a b -> Map.HashMap a b
 insertMany toInsert prgs =
-  foldl'
-    (\prgMap (modText, prg) -> Map.insert modText prg prgMap)
-    prgs
-    toInsert
+  Map.union (Map.fromList toInsert) prgs
 
 safeReadFile :: FilePath -> IO (Maybe T.Text)
 safeReadFile path = do
