@@ -122,6 +122,12 @@ getTransitiveReExports prg exports =
       exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exports
    in exportNamesSet `Set.difference` declaredNamesSet
 
+isExportedImport :: Set.Set ModuleText -> Hir.Import -> Bool
+isExportedImport exportedModNames imp =
+  case imp.alias of
+    Nothing -> imp.mod `Set.member` exportedModNames
+    Just alias -> alias `Set.member` exportedModNames
+
 getExportedNames' ::
   (HasCallStack) =>
   ProgramIndex ->
@@ -147,10 +153,24 @@ getExportedNames' prgIndex exportIndex inProgress modName
             let
               exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exportLst
               transitiveReexportNames = getTransitiveReExports prg exportLst
+              modAliasMap =
+                List.foldl'
+                  ( \acc imp ->
+                      maybe
+                        acc
+                        (\alias -> Map.insert imp.mod alias acc)
+                        imp.alias
+                  )
+                  Map.empty
+                  prg.imports
+
               reExportedMods = Set.fromList $ (.mod) <$> exportItemMods exportLst
               requiredImports =
                 if null transitiveReexportNames
-                  then filter (\imp -> imp.mod `Set.member` reExportedMods) prg.imports
+                  then
+                    filter
+                      (isExportedImport reExportedMods)
+                      prg.imports
                   else prg.imports
 
               (allImportedNames, updatedExportIdx) =
@@ -160,7 +180,6 @@ getExportedNames' prgIndex exportIndex inProgress modName
                 filter
                   ( \expInfo ->
                       expInfo.name `Set.member` exportNamesSet
-                        || expInfo.importedFrom `Set.member` reExportedMods
                   )
                   allImportedNames
 
@@ -168,6 +187,10 @@ getExportedNames' prgIndex exportIndex inProgress modName
                 filter
                   ( \expInfo ->
                       expInfo.importedFrom `Set.member` reExportedMods
+                        || maybe
+                          False
+                          (\alias -> alias `Set.member` reExportedMods)
+                          (Map.lookup expInfo.importedFrom modAliasMap)
                   )
                   allImportedNames
 

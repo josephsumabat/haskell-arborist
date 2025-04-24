@@ -978,11 +978,11 @@ main = do
     hsFiles <- getAllHsFiles src
     -- mapM_ putStrLn hsFiles
 
-    allPrgs <- lazyGetPrgs hsFiles
+    -- allPrgs <- lazyGetPrgs hsFiles
     justTarget <- lazyGetPrgs targetFile
     let Just target = Map.lookup (parseModuleTextFromText targetMod) justTarget
     (requiredPrograms, exportIdx) <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 1)
-    let exportIdx2 = getExportedNames allPrgs Map.empty (parseModuleTextFromText "Handler.Util")
+    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Handler.Util")
     -- let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     -- let renameTree = renamePrg allPrgs Map.empty target
     let renameTree = renamePrg requiredPrograms Map.empty target

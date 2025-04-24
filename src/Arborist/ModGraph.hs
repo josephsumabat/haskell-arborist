@@ -110,8 +110,9 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
             case prg.exports of
               Nothing -> ([], (.mod) <$> prg.imports)
               Just exports ->
-                let exportedMods = (.mod) <$> exportItemMods exports
+                let exportedModNames = Set.fromList $ (.mod) <$> exportItemMods exports
                     allImportMods = (.mod) <$> prg.imports
+                    exportedMods = (.mod) <$> filter (isExportedImport exportedModNames) prg.imports
                     transitiveNames = getTransitiveReExports prg exports
                     req =
                       if Set.null transitiveNames
