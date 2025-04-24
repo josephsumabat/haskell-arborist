@@ -1,19 +1,19 @@
 module ModUtils where
 
 import Control.Monad
+import Data.HashMap.Lazy qualified as Map
 import Data.Path qualified as Path
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types
-import System.FilePath
-import qualified Data.HashMap.Lazy as Map
 import System.Directory (doesDirectoryExist, listDirectory)
+import System.FilePath
 
 pathToModule :: [Path.AbsPath] -> Path.AbsPath -> Maybe ModuleText
 pathToModule srcDirs absPath = do
   let fp = Path.toFilePath absPath
   unsafePathToModule (Path.toFilePath <$> srcDirs) fp
-  
+
 unsafePathToModule :: [FilePath] -> FilePath -> Maybe ModuleText
 unsafePathToModule srcDirs fp = do
   modPath <- msum ((\srcDir -> makeRelativeMaybe srcDir fp) <$> srcDirs)

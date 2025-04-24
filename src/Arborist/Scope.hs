@@ -12,7 +12,6 @@ import Control.Error (headMay)
 import Data.Either.Extra
 import Data.List qualified as List
 import Data.Maybe
-import Debug.Trace
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
 

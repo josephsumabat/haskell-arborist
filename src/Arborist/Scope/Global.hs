@@ -1,21 +1,20 @@
 module Arborist.Scope.Global where
 
 import AST
-import Data.Set.NonEmpty qualified as NES
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as Set
+import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
-import Debug.Trace
 import GHC.Stack
 import Hir
 import Hir.Parse
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import qualified Data.List.NonEmpty as NE
 
 data ExportedName = ExportedName
   { name :: T.Text
@@ -174,10 +173,8 @@ getExportedNames' prgIndex exportIndex inProgress modName
 
               selfExports =
                 if modName `Set.member` reExportedMods
-                   then
-                    declaredNames
-                   else
-                    filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
+                  then declaredNames
+                  else filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
 
               exportedNames =
                 (infoToExport <$> moduleExports)
@@ -252,7 +249,8 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
     )
   tryMergeSig s requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
-    && v.name == s.name && requiresQualifier == v.requiresQualifier =
+        && v.name == s.name
+        && requiresQualifier == v.requiresQualifier =
         case v.sig of
           Nothing ->
             let merged = v {sig = Just s, importedFrom = NES.insert importedFrom v.importedFrom, requiresQualifier}
@@ -285,10 +283,11 @@ availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNam
     )
   tryMergeBind b requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
-    && v.name == b.name  && requiresQualifier == v.requiresQualifier =
+        && v.name == b.name
+        && requiresQualifier == v.requiresQualifier =
         case v.binds of
           [] ->
-            let merged = v {binds = [b], importedFrom = NES.insert importedFrom  v.importedFrom, loc = (AST.getDynNode b.node).nodeLineColRange}
+            let merged = v {binds = [b], importedFrom = NES.insert importedFrom v.importedFrom, loc = (AST.getDynNode b.node).nodeLineColRange}
              in (Just merged, vs)
           [existingBind]
             | equalBind existingBind b ->

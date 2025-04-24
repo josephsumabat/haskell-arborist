@@ -18,7 +18,6 @@ import Data.Maybe qualified as Maybe
 import Data.Range (Range)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Debug.Trace
 import Hir.Types
 import TreeSitter.Api
 

@@ -37,8 +37,10 @@ flag par
 library
   exposed-modules:
       Arborist.Debug
+      Arborist.Debug.Trace
       Arborist.DocIndex
       Arborist.Exports
+      Arborist.Files
       Arborist.Haddock
       Arborist.ModExports
       Arborist.ModGraph

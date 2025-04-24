@@ -188,9 +188,10 @@ renamePrg availPrgs exportIdx prg =
     case Map.lookup varName (currScope.glblVarInfo) of
       Nothing -> []
       Just modVarMap ->
-        tryMergeGlblVarInfo $ filter (\varInfo -> not varInfo.requiresQualifier) $
-          List.foldl' collect [] (Map.toList modVarMap)
-    where
-      collect  acc (modName, varInfos)
-        | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
-        | otherwise = acc
+        tryMergeGlblVarInfo $
+          filter (\varInfo -> not varInfo.requiresQualifier) $
+            List.foldl' collect [] (Map.toList modVarMap)
+   where
+    collect acc (modName, varInfos)
+      | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
+      | otherwise = acc

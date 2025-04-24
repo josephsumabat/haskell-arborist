@@ -13,9 +13,9 @@ import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Debug.Trace
 import Hir
 import Hir.Types qualified as Hir
-import Debug.Trace
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =

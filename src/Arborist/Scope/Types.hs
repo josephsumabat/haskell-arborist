@@ -2,15 +2,15 @@ module Arborist.Scope.Types where
 
 import AST
 import AST.Haskell qualified as AST
+import Control.Applicative
 import Data.HashMap.Lazy qualified as Map
 import Data.LineColRange
+import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
+import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import Data.Set.NonEmpty qualified as NES
-import qualified Data.List as List
-import Control.Applicative
 
 data GlblNameInfo = GlblNameInfo
   { name :: T.Text
@@ -40,17 +40,18 @@ data GlblVarInfo = GlblVarInfo
 tryMergeGlblVarInfo :: [GlblVarInfo] -> [GlblVarInfo]
 tryMergeGlblVarInfo =
   Map.elems . List.foldl' insert Map.empty
-  where
-    insert acc g =
-      Map.insertWith mergeOne (g.originatingMod, g.name, g.requiresQualifier) g acc
+ where
+  insert acc g =
+    Map.insertWith mergeOne (g.originatingMod, g.name, g.requiresQualifier) g acc
 
-    mergeOne g1 g2 = GlblVarInfo
-      { sig            = g1.sig <|> g2.sig
-      , binds          = g1.binds ++ g2.binds
-      , importedFrom   = NES.union g1.importedFrom g2.importedFrom
+  mergeOne g1 g2 =
+    GlblVarInfo
+      { sig = g1.sig <|> g2.sig
+      , binds = g1.binds ++ g2.binds
+      , importedFrom = NES.union g1.importedFrom g2.importedFrom
       , originatingMod = g1.originatingMod
-      , name           = g1.name
-      , loc            = min g1.loc g2.loc
+      , name = g1.name
+      , loc = min g1.loc g2.loc
       , requiresQualifier = g1.requiresQualifier
       }
 
