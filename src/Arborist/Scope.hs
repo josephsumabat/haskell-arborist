@@ -38,33 +38,35 @@ getScope availPrgs exportIdx n !scopeStack =
                   Just localBinds -> addLocalWhereBinds scopeWithParams (Hir.parseLocalBinds localBinds) : scopeStack
            in scopeWithBinds
         Just (AST.Inj @(AST.BindP) bindNode) ->
-          -- Add local params when encountering a function node
-          let mWhereBinds = (eitherToMaybe $ AST.unwrap bindNode) >>= (.binds)
-              curScope = fromMaybe emptyScope (headMay scopeStack)
-              scopeWithBinds =
-                case mWhereBinds of
-                  Nothing -> scopeStack
-                  Just localBinds -> addLocalWhereBinds curScope (Hir.parseLocalBinds localBinds) : scopeStack
-           in scopeWithBinds
+          let mBindU = eitherToMaybe $ AST.unwrap bindNode
+              mArrow = mBindU >>= (.arrow) in
+          case mArrow of
+            Nothing ->
+              let mWhereBinds = mBindU >>= (.binds)
+                  curScope = fromMaybe emptyScope (headMay scopeStack)
+                  scopeWithBinds =
+                    case mWhereBinds of
+                      Nothing -> scopeStack
+                      Just localBinds -> addLocalWhereBinds curScope (Hir.parseLocalBinds localBinds) : scopeStack
+               in scopeWithBinds
+            Just _ ->
+              -- bind within do
+              let mRawPats = (eitherToMaybe $ AST.unwrap bindNode) >>= (.pattern')
+               in case mRawPats of
+                    Just (AST.Inj @AST.PatternP patNode) -> addLocalPatVars currScope (Hir.parsePattern patNode) : scopeStack
+                    Just _ -> scopeStack
+                    Nothing -> scopeStack
         Just (AST.Inj @(AST.LetInP) letInNode) ->
           let mLocalBinds = (eitherToMaybe $ AST.unwrap letInNode) >>= (.binds)
            in case mLocalBinds of
                 Nothing -> scopeStack
                 Just localBinds -> addLocalLetBinds currScope (Hir.parseLocalBinds localBinds) : scopeStack
-        -----------------------------
-        -- Bindings within do
+        -- let binding within do
         Just (AST.Inj @(AST.LetP) letNode) ->
           let mLocalBinds = (eitherToMaybe $ AST.unwrap letNode) >>= (.binds)
            in case mLocalBinds of
                 Nothing -> scopeStack
                 Just localBinds -> addLocalLetBinds currScope (Hir.parseLocalBinds localBinds) : scopeStack
-        Just (AST.Inj @(AST.BindP) bindNode) ->
-          let mRawPats = (eitherToMaybe $ AST.unwrap bindNode) >>= (.pattern')
-           in case mRawPats of
-                Just (AST.Inj @AST.PatternP patNode) -> addLocalPatVars currScope (Hir.parsePattern patNode) : scopeStack
-                Just _ -> scopeStack
-                Nothing -> scopeStack
-        -----------------------------
         Just (AST.Inj @(AST.AlternativeP) caseAltNode) ->
           let mRawPats = (eitherToMaybe $ AST.unwrap caseAltNode) >>= (.pattern')
            in case mRawPats of
