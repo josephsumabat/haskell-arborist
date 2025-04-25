@@ -210,7 +210,7 @@ data Program = Program
   , imports :: [Import]
   , exports :: Maybe [ExportItem]
   , decls :: [Decl]
-  , dynNode :: DynNode
+  , node :: Haskell.HaskellP
   }
   deriving (Show, Eq)
 

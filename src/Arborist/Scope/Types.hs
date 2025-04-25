@@ -2,6 +2,7 @@ module Arborist.Scope.Types where
 
 import AST
 import AST.Haskell qualified as AST
+import Arborist.Haddock
 import Control.Applicative
 import Data.HashMap.Lazy qualified as Map
 import Data.LineColRange
@@ -36,6 +37,10 @@ data GlblVarInfo = GlblVarInfo
   , requiresQualifier :: Bool
   }
   deriving (Show, Eq)
+
+glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
+glblVarInfoToQualified glbl =
+  QualifiedName glbl.originatingMod glbl.name.node.nodeText
 
 tryMergeGlblVarInfo :: [GlblVarInfo] -> [GlblVarInfo]
 tryMergeGlblVarInfo =

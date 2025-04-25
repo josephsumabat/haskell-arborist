@@ -39,6 +39,7 @@ dependencies:
   - time
   - nonempty-containers
   - unordered-containers >= 0.2 && < 0.3
+  - safe
 
 
 default-extensions:

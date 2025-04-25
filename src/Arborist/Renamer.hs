@@ -100,7 +100,7 @@ renamePrg availPrgs exportIdx prg =
           , unqualifiedImports = maybe unqualifiedImports (`Set.insert` unqualifiedImports) prg.mod
           , scope = initialScope
           }
-   in AST.cast @HaskellR (go renamerEnv prg.dynNode)
+   in AST.cast @HaskellR (go renamerEnv prg.node.dynNode)
  where
   go :: RenamerEnv -> AST.DynNode -> AST.DynNode
   go renamerEnv n =

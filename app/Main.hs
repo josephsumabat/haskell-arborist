@@ -7,7 +7,9 @@ import AST.Haskell qualified
 import AST.Haskell qualified as AST
 import AST.Traversal (getDeepestContainingLineCol)
 import Arborist.Debug
+import Arborist.Debug.Trace
 import Arborist.Files
+import Arborist.Haddock
 import Arborist.ModGraph
 import Arborist.Renamer (RenamePhase, renamePrg)
 import Arborist.Renamer.GlobalEnv
@@ -29,6 +31,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as Text
 import Data.Text.Lazy qualified as Text
 import Data.Time
+import Debug.Trace
 import GHC.IO (unsafeInterleaveIO)
 import HaskellAnalyzer
 import Hir.Parse
@@ -989,7 +992,9 @@ main = do
     let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renameTree
     let loc = point (LineCol (mkPos 87) (mkPos 29))
     let chosenNode = (getDeepestContainingLineCol @(AST.Variable RenamePhase) loc) . (.dynNode) =<< renameTree
+    let prgHaddocks = indexPrgHaddocks Map.empty target
     -- traceShowM (length (Map.keys requiredPrograms))
+    traceShowMPretty prgHaddocks
     -- traceShowM (length (Map.keys allPrgs))
     -- traceM $ Text.unpack . pShowNoColor $ (fst exportIdx2)
     -- traceM $ Text.unpack . pShowNoColor $ availableNamesToScope $ (filter (\g -> g.originatingMod == parseModuleTextFromText "Import.Handler") glblAvail)

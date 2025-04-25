@@ -101,6 +101,7 @@ library
     , nonempty-containers
     , optics
     , pretty-simple
+    , safe
     , text
     , text-range
     , time
@@ -159,6 +160,7 @@ executable haskell-arborist
     , nonempty-containers
     , optics
     , pretty-simple
+    , safe
     , text
     , text-range
     , time
@@ -219,6 +221,7 @@ test-suite haskell-arborist-test
     , nonempty-containers
     , optics
     , pretty-simple
+    , safe
     , text
     , text-range
     , time

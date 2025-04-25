@@ -8,31 +8,31 @@ packages:
 source-repository-package
     type: git
     location: https://github.com/josephsumabat/tree-sitter-simple.git
-    tag: 03085cb9e6f1c7850e0c3bcd227ba0c730c7013e
+    tag: 71014f072dd3c165848227aaa38217a2595057b4
     subdir: tree-sitter-simple
 
 source-repository-package
     type: git
     location: https://github.com/josephsumabat/tree-sitter-simple.git
-    tag: 03085cb9e6f1c7850e0c3bcd227ba0c730c7013e
+    tag: 71014f072dd3c165848227aaa38217a2595057b4
     subdir: tree-sitter-haskell
 
 source-repository-package
     type: git
     location: https://github.com/josephsumabat/tree-sitter-simple.git
-    tag: 03085cb9e6f1c7850e0c3bcd227ba0c730c7013e
+    tag: 71014f072dd3c165848227aaa38217a2595057b4
     subdir: tree-sitter-ast
 
 source-repository-package
     type: git
     location: https://github.com/josephsumabat/tree-sitter-simple.git
-    tag: 03085cb9e6f1c7850e0c3bcd227ba0c730c7013e
+    tag: 71014f072dd3c165848227aaa38217a2595057b4
     subdir: haskell-ast
 
 source-repository-package
     type: git
     location: https://github.com/josephsumabat/tree-sitter-simple.git
-    tag: 03085cb9e6f1c7850e0c3bcd227ba0c730c7013e
+    tag: 71014f072dd3c165848227aaa38217a2595057b4
     subdir: text-range
 
 source-repository-package

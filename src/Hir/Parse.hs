@@ -424,7 +424,7 @@ emptyProgram =
     , exports = Nothing
     , decls = []
     , mod = Nothing
-    , dynNode = AST.defaultNode
+    , node = H.defaultHaskellNode
     }
 
 parseHaskell :: H.HaskellP -> ([Text], Program)
@@ -464,7 +464,7 @@ parseHaskell h = do
               let (es, decls') = Either.partitionEithers decls
               let decls'' = concat decls'
               pure (es, decls'')
-        pure (es ++ es' ++ es'', Program {imports, exports, decls, mod, dynNode = h.dynNode})
+        pure (es ++ es' ++ es'', Program {imports, exports, decls, mod, node = h})
   case res of
     Right (es, program) -> (es, program)
     Left e -> ([e], emptyProgram)
