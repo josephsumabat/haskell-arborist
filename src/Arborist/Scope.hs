@@ -23,7 +23,7 @@ getScope availPrgs exportIdx n !scopeStack =
           -- Add top level and imported bindings
           let (_, prg) = Hir.parseHaskell haskellNode
               availableNames = getGlobalAvailableNames availPrgs exportIdx prg
-              modScope = availableNamesToScope availableNames
+              modScope = globalNamesToScope availableNames
            in modScope : scopeStack
         Just (AST.Inj @(AST.FunctionP) fnNode) ->
           -- Add local params when encountering a function node
@@ -75,7 +75,7 @@ getScope availPrgs exportIdx n !scopeStack =
                 Nothing -> scopeStack
         Just (AST.Inj @(AST.LambdaP) lambdaNode) ->
           let mPats = (.patterns) <$> (eitherToMaybe $ AST.unwrap lambdaNode)
-              pats = maybe [] Hir.parsePatterns mPats in
-              addManyLocalPatVars currScope pats : scopeStack
+              pats = maybe [] Hir.parsePatterns mPats
+           in addManyLocalPatVars currScope pats : scopeStack
         Just _ -> scopeStack
         Nothing -> scopeStack

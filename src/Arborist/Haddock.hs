@@ -36,6 +36,7 @@ instance Hashable QualifiedName where
 
 type HaddockIndex = Map.HashMap QualifiedName HaddockInfo
 
+-- | Index haddocks for multiple programs
 indexManyPrgHaddocks :: HaddockIndex -> [Hir.Program] -> HaddockIndex
 indexManyPrgHaddocks haddockIndex prgs =
   List.foldl' (\acc prg -> indexPrgHaddocks acc prg) haddockIndex prgs
@@ -63,6 +64,8 @@ indexPrgHaddocks haddockIndex prg =
        in declHaddocks
 
 -- | Special case of initial haddock - the haddock is parsed as a part of imports instead of declarations
+-- so we attempt to check to see if the last import child is a haddock and the first declaration has a name
+-- we can attach it to
 tryInitialHaddock :: HaddockIndex -> Hir.ModuleText -> AST.ImportsUP -> AST.DeclarationsUP -> HaddockIndex
 tryInitialHaddock haddockIndex mod imps decls =
   let mLastImport = lastMay imps.dynNode.nodeChildren
@@ -82,6 +85,7 @@ tryInitialHaddock haddockIndex mod imps decls =
                 _ -> haddockIndex
         _ -> haddockIndex
 
+-- | General case, look ahead trying to find haddocks and names to attach them to
 step :: HaddockIndex -> Hir.ModuleText -> [AST.DynNode] -> HaddockIndex
 step !haddockIndex _mod [] = haddockIndex
 step !haddockIndex _mod [_nodeChild] = haddockIndex

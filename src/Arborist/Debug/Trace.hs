@@ -20,6 +20,6 @@ traceWhen :: (Show s) => Bool -> s -> a -> a
 traceWhen cond p v =
   if cond then traceShowPretty p v else v
 
-traceIdWhen :: (Show a) => Bool -> a -> a 
+traceIdWhen :: (Show a) => Bool -> a -> a
 traceIdWhen cond v =
   if cond then traceShowPretty v v else v

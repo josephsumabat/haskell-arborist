@@ -13,10 +13,10 @@ import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
 
-data GlblNameInfo = GlblNameInfo
+-- | An intermediate representation of a declaration annotated
+data GlblDeclInfo = GlblDeclInfo
   { name :: T.Text
   , decl :: Decl
-  , dynNode :: DynNode
   , originatingMod :: ModuleText
   , importedFrom :: ModuleText
   , requiresQualifier :: Bool

@@ -20,10 +20,10 @@ import Hir.Types qualified as Hir
 
 addManyLocalPatVars :: Scope -> [Hir.Pattern] -> Scope
 addManyLocalPatVars currScope pats =
-   List.foldl'
-        addLocalPatVars
-        currScope
-        (reverse pats) -- Reverse for efficiency
+  List.foldl'
+    addLocalPatVars
+    currScope
+    (reverse pats) -- Reverse for efficiency
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =

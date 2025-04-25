@@ -984,7 +984,7 @@ main = do
     -- allPrgs <- lazyGetPrgs hsFiles
     justTarget <- lazyGetPrgs targetFile
     let Just target = Map.lookup (parseModuleTextFromText targetMod) justTarget
-    (requiredPrograms, exportIdx) <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 1)
+    requiredPrograms <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 2)
     let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Handler.Util")
     -- let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     -- let renameTree = renamePrg allPrgs Map.empty target
@@ -992,9 +992,7 @@ main = do
     let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renameTree
     let loc = point (LineCol (mkPos 87) (mkPos 29))
     let chosenNode = (getDeepestContainingLineCol @(AST.Variable RenamePhase) loc) . (.dynNode) =<< renameTree
-    let prgHaddocks = indexPrgHaddocks Map.empty target
     -- traceShowM (length (Map.keys requiredPrograms))
-    traceShowMPretty prgHaddocks
     -- traceShowM (length (Map.keys allPrgs))
     -- traceM $ Text.unpack . pShowNoColor $ (fst exportIdx2)
     -- traceM $ Text.unpack . pShowNoColor $ availableNamesToScope $ (filter (\g -> g.originatingMod == parseModuleTextFromText "Import.Handler") glblAvail)

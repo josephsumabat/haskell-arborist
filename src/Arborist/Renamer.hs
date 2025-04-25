@@ -12,23 +12,23 @@ where
 
 import AST qualified
 import AST.Haskell qualified as AST
+import Arborist.Exports
 import Arborist.ModGraph
 import Arborist.Scope
 import Arborist.Scope.Global
 import Arborist.Scope.Types
 import Control.Error
 import Data.Bifunctor qualified as Bifunctor
+import Data.Either.Extra (eitherToMaybe)
 import Data.HashMap.Lazy qualified as Map
 import Data.LineColRange
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
+import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
-import Hir.Types qualified as Hir
 import Hir.Parse qualified as Hir
-import Data.Either.Extra (eitherToMaybe)
-import qualified Data.Set.NonEmpty as NESet
-import Arborist.Debug.Trace
+import Hir.Types qualified as Hir
 
 data RenamePhase
 
@@ -70,7 +70,6 @@ fstResolved resolvedNames =
   moreResolved _ a@(ResolvedVariable _) = a
   moreResolved a _b = a
 
--- type instance XName RenamePhase = ResolvedVariable
 instance AST.NodeX RenamePhase where
   type XName RenamePhase = ResolvedName
   type XVariable RenamePhase = ResolvedVariable
@@ -119,8 +118,9 @@ renamePrg availPrgs exportIdx prg =
       -- do node is a special case since statements are in scope for all
       -- subsequent statements
       Just _doNode ->
-        let (_, newChildren) =
-              List.foldl' (resolveDoChild n) (renamerEnv, []) (reverse n.nodeChildren)
+        let (_, reversedChildren) =
+              List.foldl' (resolveDoChild n) (renamerEnv, []) n.nodeChildren
+            newChildren = reverse reversedChildren
          in (resolveNode renamerEnv parent n) {AST.nodeChildren = newChildren}
 
   -- Special case for do notation
@@ -149,30 +149,29 @@ renamePrg availPrgs exportIdx prg =
 
   -- Lookup a var name
   resolveVarName :: RenamerEnv -> (Maybe AST.DynNode) -> AST.VariableP -> ResolvedVariable
-  resolveVarName renamerEnv parent varP = 
-            case renamerEnv.scope of
-              [] -> NoVarFound
-              (currScope : _) -> handle currScope
-    where
-      fieldParent = parent >>= AST.cast @AST.FieldNameP >>= (eitherToMaybe . AST.unwrap)
-      qualifiedParent = parent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap)
+  resolveVarName renamerEnv parent varP =
+    case renamerEnv.scope of
+      [] -> NoVarFound
+      (currScope : _) -> handle currScope
+   where
+    fieldParent = parent >>= AST.cast @AST.FieldNameP >>= (eitherToMaybe . AST.unwrap)
+    qualifiedParent = parent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap)
 
-      handle :: Scope -> ResolvedVariable
-      handle currScope
-        -- The variable is a field - we dont have enough information to figure out where it is from right now (would require typechecking)
-        | Just _f <- fieldParent = ResolvedField
-        -- Qualified variable
-        | Just qualU <- qualifiedParent =
-          let qualifier = qualU.module' 
+    handle :: Scope -> ResolvedVariable
+    handle currScope
+      -- The variable is a field - we dont have enough information to figure out where it is from right now (would require typechecking)
+      | Just _f <- fieldParent = ResolvedField
+      -- Qualified variable
+      | Just qualU <- qualifiedParent =
+          let qualifier = qualU.module'
               varName = varP.dynNode.nodeText
               globalResolved = getGlobalResolvedVariables renamerEnv currScope varName (Just qualifier)
-                 in 
-                 globalResolved
-        | otherwise =
-            let varName = varP.dynNode.nodeText
-                localResolved = getLocalResolvedVariables currScope varName
-                globalResolved = getGlobalResolvedVariables renamerEnv currScope varName Nothing
-                 in fstResolved [localResolved, globalResolved]
+           in globalResolved
+      | otherwise =
+          let varName = varP.dynNode.nodeText
+              localResolved = getLocalResolvedVariables currScope varName
+              globalResolved = getGlobalResolvedVariables renamerEnv currScope varName Nothing
+           in fstResolved [localResolved, globalResolved]
 
   getLocalResolvedVariables :: Scope -> T.Text -> ResolvedVariable
   getLocalResolvedVariables currScope varName =
@@ -211,15 +210,16 @@ renamePrg availPrgs exportIdx prg =
                 List.foldl' collect [] (Map.toList modVarMap)
           Just q ->
             let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
-                mMods = fromMaybe [] $
-                  mAliasName >>=
-                    \aliasName -> Map.lookup aliasName renamerEnv.aliasModMap in
-            tryMergeGlblVarInfo $
-              filter
-                (\varInfo ->
-                          any (`NESet.member` varInfo.importedFrom) mMods
-                     ) $
-                List.foldl' collect [] (Map.toList modVarMap)
+                mMods =
+                  fromMaybe [] $
+                    mAliasName
+                      >>= \aliasName -> Map.lookup aliasName renamerEnv.aliasModMap
+             in tryMergeGlblVarInfo
+                  $ filter
+                    ( \varInfo ->
+                        any (`NESet.member` varInfo.importedFrom) mMods
+                    )
+                  $ List.foldl' collect [] (Map.toList modVarMap)
    where
     collect acc (modName, varInfos)
       | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc

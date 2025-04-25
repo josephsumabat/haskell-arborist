@@ -2,6 +2,7 @@
 
 module Arborist.ModGraph (gatherScopeDeps, ProgramIndex, prgsToMap) where
 
+import Arborist.Exports
 import Arborist.Files
 import Arborist.ProgramIndex
 import Arborist.Scope.Global
@@ -20,74 +21,68 @@ import Data.Text.IO qualified as T
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
-import Hir.Parse
 import Hir.Types
 import Hir.Types qualified as Hir
 import ModUtils
 import System.Directory qualified as Dir
 
-data ModGraph = ModGraph
-  { transitiveImports :: Map.HashMap ModuleText (Set.Set ModuleText)
-  -- ^ imports as well as re-exported modules and imports
-  -- e.g. any module that has an observable name
-  }
-
-gatherScopeDeps :: ProgramIndex -> Hir.Program -> ModFileMap -> Maybe Int -> IO (ProgramIndex, ExportIndex)
+-- | Find all dependencies required to resolve a given module and add them to a `ProgramIndex`
+-- Optionally accepts a maximum depth to search dependencies for
+gatherScopeDeps :: ProgramIndex -> Hir.Program -> ModFileMap -> Maybe Int -> IO ProgramIndex
 gatherScopeDeps prgIndex thisPrg modFileMap maxDepth = do
-  (prgs, exports) <- indexImports prgIndex thisPrg modFileMap maxDepth
+  prgs <- indexImports prgIndex thisPrg modFileMap maxDepth
   let prgsWithSelf = fromMaybe prgs ((\mod -> Map.insert mod thisPrg prgs) <$> thisPrg.mod)
-  pure (prgsWithSelf, exports)
+  pure prgsWithSelf
 
-getRequiredFiles :: ModFileMap -> ModuleText -> [(ModuleText, FilePath)]
-getRequiredFiles modFileMap mod =
-  maybe [] (List.singleton . (mod,)) (Map.lookup mod modFileMap)
+-- | Helper to look up a list of modules
+getModFiles :: ModFileMap -> [ModuleText] -> [(ModuleText, FilePath)]
+getModFiles modFileMap mods =
+  mods >>= \mod -> maybe [] (List.singleton . (mod,)) (Map.lookup mod modFileMap)
 
+-- | Index all imports of a given program
 indexImports ::
   ProgramIndex ->
   Hir.Program ->
   ModFileMap ->
   Maybe Int ->
-  IO (ProgramIndex, ExportIndex)
+  IO ProgramIndex
 indexImports prgs thisPrg modFileMap maxDepth = do
   let requiredFilesWithSrc =
-        thisPrg.imports >>= (getRequiredFiles modFileMap) . (.mod)
+        getModFiles modFileMap ((.mod) <$> thisPrg.imports)
   -- traceShowM thisPrg.mod
   (importedPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
   allPrgs <-
     foldl'
       ( \currIdxsM (modText, prg) -> do
-          (currPrgs, currExports) <- currIdxsM
-          indexImport currPrgs currExports modText prg modFileMap maxDepth
+          currPrgs <- currIdxsM
+          indexImport currPrgs modText prg modFileMap maxDepth
       )
-      (pure (prgs', Map.empty))
+      (pure prgs')
       importedPrgs
 
   pure allPrgs
 
-indexImport :: ProgramIndex -> ExportIndex -> ModuleText -> Hir.Program -> ModFileMap -> Maybe Int -> IO (ProgramIndex, ExportIndex)
-indexImport prgs exportIndex modText thisPrg modFileMap maxDepth = do
+indexImport :: ProgramIndex -> ModuleText -> Hir.Program -> ModFileMap -> Maybe Int -> IO (ProgramIndex)
+indexImport prgs modText thisPrg modFileMap maxDepth = do
   let addImports = Map.insert modText thisPrg prgs
-   in -- indexTransitiveReExports addImports modText thisPrg baseDirs
-      indexTransitiveReExports addImports exportIndex modText thisPrg modFileMap maxDepth
+   in indexTransitiveReExports addImports modText thisPrg modFileMap maxDepth
 
 -- | Index re-exports transitively, stopping early when all re-exported names are found.
 indexTransitiveReExports ::
   (HasCallStack) =>
   ProgramIndex ->
-  ExportIndex ->
   ModuleText ->
   Hir.Program ->
   ModFileMap ->
   Maybe Int ->
-  IO (ProgramIndex, ExportIndex)
-indexTransitiveReExports prgs exportIndex modText thisPrg modFileMap maxDepth =
+  IO (ProgramIndex)
+indexTransitiveReExports prgs modText thisPrg modFileMap maxDepth =
   case thisPrg.exports of
-    Nothing ->
-      let (_, exportedIndex) = getExportedNames prgs exportIndex modText
-       in pure (prgs, exportedIndex)
+    Nothing -> pure prgs
     Just _exports -> do
       resolveReexports prgs Set.empty [(modText, thisPrg, 0)] modFileMap maxDepth
 
+-- | Does a DFS
 resolveReexports ::
   (HasCallStack) =>
   ProgramIndex ->
@@ -95,12 +90,12 @@ resolveReexports ::
   [(ModuleText, Hir.Program, Int)] -> -- worklist (with per-module depth)
   ModFileMap -> -- base directories to check for haskell files
   Maybe Int -> -- max depth
-  IO (ProgramIndex, ExportIndex)
+  IO (ProgramIndex)
 resolveReexports prgs _visited [] _ _ =
-  pure (prgs, Map.empty)
+  pure prgs
 resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
   | Just maxD <- maxDepth
-  , depth > maxD =
+  , depth >= maxD =
       resolveReexports prgs visited rest modFileMap maxDepth
   | otherwise = do
       let visited' = Set.insert modText visited
@@ -110,17 +105,21 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
             case prg.exports of
               Nothing -> ([], (.mod) <$> prg.imports)
               Just exports ->
-                let exportedModNames = Set.fromList $ (.mod) <$> exportItemMods exports
-                    allImportMods = (.mod) <$> prg.imports
-                    exportedMods = (.mod) <$> filter (isExportedImport exportedModNames) prg.imports
-                    transitiveNames = getTransitiveReExports prg exports
-                    req =
-                      if Set.null transitiveNames
-                        then exportedMods
-                        else allImportMods
-                 in (exportedMods, req)
+                let
+                  reExportedAliases = (.mod) <$> exportItemMods exports
+                  aliasModMap = getAliasModMap prg.imports
+                  reExportedMods = modsFromAliases aliasModMap reExportedAliases
+                  allImportMods = (.mod) <$> prg.imports
+                  exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) prg.imports
+                  transitiveNames = getTransitiveReExports prg exports
+                  req =
+                    if Set.null transitiveNames
+                      then exportedMods
+                      else allImportMods
+                 in
+                  (exportedMods, req)
 
-      let requiredFilesWithSrc = requiredModules >>= getRequiredFiles modFileMap
+      let requiredFilesWithSrc = getModFiles modFileMap requiredModules
 
       -- Parse required modules
       (newPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
@@ -132,15 +131,19 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
 
       resolveReexports prgs' visited' (newWork ++ rest) modFileMap maxDepth
 
+-- | Return the parsed representation for each module in a given list of modules
+-- also indexes the parsed module such that each module is never re-parsed
 getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Program)], ProgramIndex)
 getPrgs prgs hsFiles =
   foldM step ([], Set.empty, prgs) hsFiles >>= \(newModules, _, updatedMap) -> do
-    -- traceShowM $ "getPrgs finished with " <> show (length newModules) <> " new modules"
     pure (newModules, updatedMap)
  where
   step ::
-    ([(ModuleText, Program)], Set.Set ModuleText, ProgramIndex) ->
-    (ModuleText, FilePath) ->
+    ( [(ModuleText, Program)] -- List of requested modules
+    , Set.Set ModuleText -- Modules that we have already added to the list
+    , ProgramIndex -- Updated program index
+    ) ->
+    (ModuleText, FilePath) -> -- Module to attempt to lookup
     IO ([(ModuleText, Program)], Set.Set ModuleText, ProgramIndex)
   step (!parsedList, !seen, !prgIndex) (modText, file) =
     case (Map.lookup modText prgIndex, Set.member modText seen) of
@@ -152,7 +155,6 @@ getPrgs prgs hsFiles =
         fileExists <- Dir.doesFileExist file
         if fileExists
           then do
-            -- traceShowM $ "Parsing " <> file
             fileContents <- T.decodeUtf8 <$> BS.readFile file
             let (_src, !prg) = parsePrg fileContents
                 !parsedList' = (modText, prg) : parsedList
@@ -161,55 +163,3 @@ getPrgs prgs hsFiles =
             pure (parsedList', nextSeen, nextPrgIndex)
           else do
             pure (parsedList, seen, prgIndex)
-
-insertMany :: (Hashable a) => [(a, b)] -> Map.HashMap a b -> Map.HashMap a b
-insertMany toInsert prgs =
-  Map.union (Map.fromList toInsert) prgs
-
-safeReadFile :: FilePath -> IO (Maybe T.Text)
-safeReadFile path = do
-  result <- try (T.readFile path) :: IO (Either SomeException T.Text)
-  pure $ either (const Nothing) Just result
-
--- Unoptimized
-indexTransitiveReExportsOld :: ProgramIndex -> ModuleText -> Hir.Program -> [FilePath] -> IO ProgramIndex
-indexTransitiveReExportsOld prgs modText thisPrg baseDirs = do
-  case thisPrg.exports of
-    Nothing -> pure prgs
-    Just exports -> do
-      let exportedMods = (.mod) <$> mapMaybe getMod exports
-          allImportMods = (.mod) <$> thisPrg.imports
-          transitiveReExports = getTransitiveReExports thisPrg exports
-          requiredFilesWithSrc =
-            if null transitiveReExports
-              then exportedMods >>= (modWithFiles baseDirs)
-              else allImportMods >>= (modWithFiles baseDirs)
-      (directExportPrgs, prgsWithExports) <- getPrgs prgs requiredFilesWithSrc
-      reachablePrgs <-
-        foldl'
-          ( \currPrgsM (modText, prg) -> do
-              currPrgs <- currPrgsM
-              let seen = Map.member modText currPrgs
-              if not seen
-                then
-                  let currPrgs' = Map.insert modText prg currPrgs
-                   in indexTransitiveReExportsOld currPrgs' modText prg baseDirs
-                else currPrgsM
-          )
-          (pure prgsWithExports)
-          directExportPrgs
-      pure reachablePrgs
- where
-  getMod :: Hir.ExportItem -> Maybe Hir.ModuleName
-  getMod (Hir.ExportModuleItem m) = Just m
-  getMod (Hir.ExportItem {}) = Nothing
-
-nubByKey :: (Ord k) => (a -> k) -> [a] -> [a]
-nubByKey toKey = go Set.empty
- where
-  go _ [] = []
-  go !seen (x : xs)
-    | Set.member k seen = go seen xs
-    | otherwise = x : go (Set.insert k seen) xs
-   where
-    k = toKey x

@@ -1,82 +1,85 @@
-module Arborist.Scope.Global where
+module Arborist.Scope.Global (
+  getExportedNames,
+  getImportNames,
+  globalNamesToScope,
+  getGlobalAvailableNames,
+  ExportIndex,
+)
+where
 
 import AST
+import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as Set
 import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import GHC.Stack
 import Hir
-import Hir.Parse
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import Control.Monad
 
-data ExportedName = ExportedName
+data ExportedDecl = ExportedDecl
   { name :: T.Text
-  , decl :: Decl
-  , dynNode :: DynNode
   , mod :: ModuleText
+  , decl :: Decl
   }
   deriving (Show)
 
-type ExportIndex = Map.HashMap ModuleText [ExportedName]
+type ExportIndex = Map.HashMap ModuleText [ExportedDecl]
 
-declToExportedName :: ModuleText -> Decl -> ExportedName
+declToExportedName :: ModuleText -> Decl -> ExportedDecl
 declToExportedName modName decl =
-  ExportedName
+  ExportedDecl
     { name = (declName decl).node.nodeText
-    , dynNode = declDynNode decl
     , mod = modName
     , decl = decl
     }
 
-exportToInfo :: ModuleText -> Bool -> ExportedName -> GlblNameInfo
+exportToInfo :: ModuleText -> Bool -> ExportedDecl -> GlblDeclInfo
 exportToInfo importedFrom qualified expName =
-  GlblNameInfo
+  GlblDeclInfo
     { name = expName.name
     , decl = expName.decl
-    , dynNode = expName.dynNode
     , originatingMod = expName.mod
     , importedFrom = importedFrom
     , requiresQualifier = qualified
     }
 
-infoToExport :: GlblNameInfo -> ExportedName
+infoToExport :: GlblDeclInfo -> ExportedDecl
 infoToExport glblInfo =
-  ExportedName
+  ExportedDecl
     { name = glblInfo.name
     , decl = glblInfo.decl
-    , dynNode = glblInfo.dynNode
     , mod = glblInfo.originatingMod
     }
 
-declToNameInfo :: ModuleText -> ModuleText -> Bool -> Decl -> GlblNameInfo
+declToNameInfo :: ModuleText -> ModuleText -> Bool -> Decl -> GlblDeclInfo
 declToNameInfo originatingMod importedFrom qualified decl =
-  GlblNameInfo
+  GlblDeclInfo
     { name = (declName decl).node.nodeText
-    , dynNode = declDynNode decl
     , originatingMod = originatingMod
     , importedFrom = importedFrom
     , requiresQualifier = qualified
     , decl = decl
     }
 
--- Public API wrappers
-getExportedNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedName], ExportIndex)
+-- | Get all names exported by a given export.
+-- Requires dependent programs in `ProgramIndex` or else will not find given imports
+getExportedNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedDecl], ExportIndex)
 getExportedNames prgIdx exportIdx modName =
   getExportedNames' prgIdx exportIdx Set.empty modName
 
-getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblNameInfo], ExportIndex)
+getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblDeclInfo], ExportIndex)
 getManyImportNames prgIdx exportIdx imps =
   getManyImportNames' prgIdx exportIdx Set.empty imps
 
-getImportNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblNameInfo], ExportIndex)
+-- | Get all names from a given import
+-- Requires dependent programs in `ProgramIndex` or else will not find given imports
+getImportNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblDeclInfo], ExportIndex)
 getImportNames prgIdx exportIdx imp =
   getImportNames' prgIdx exportIdx Set.empty imp
 
@@ -87,7 +90,7 @@ getImportNames' ::
   ExportIndex ->
   Set.Set ModuleText ->
   Hir.Import ->
-  ([GlblNameInfo], ExportIndex)
+  ([GlblDeclInfo], ExportIndex)
 getImportNames' prgIndex exportIndex inProgress thisImport =
   let qualified = thisImport.qualified
       mod = thisImport.mod
@@ -106,7 +109,7 @@ getManyImportNames' ::
   ExportIndex ->
   Set.Set ModuleText ->
   [Hir.Import] ->
-  ([GlblNameInfo], ExportIndex)
+  ([GlblDeclInfo], ExportIndex)
 getManyImportNames' prgIndex exportIndex inProgress imports =
   List.foldl'
     ( \(importedNamesAgg, idx) imp ->
@@ -116,45 +119,19 @@ getManyImportNames' prgIndex exportIndex inProgress imports =
     ([], exportIndex)
     imports
 
-getTransitiveReExports :: Hir.Program -> [Hir.ExportItem] -> Set.Set T.Text
-getTransitiveReExports prg exports =
-  let declaredNames = fmap declNameText prg.decls
-      declaredNamesSet = Set.fromList declaredNames
-      exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exports
-   in exportNamesSet `Set.difference` declaredNamesSet
-
-isExportedImport :: Set.Set ModuleText -> Hir.Import -> Bool
-isExportedImport exportedModNames imp =
-  case imp.alias of
-    Nothing -> imp.mod `Set.member` exportedModNames
-    Just alias -> alias `Set.member` exportedModNames
-
-getAliasModMap :: [Hir.Import] -> Map.HashMap ModuleText [ModuleText]
-getAliasModMap imports =
-                List.foldl'
-                  ( \acc imp ->
-                      maybe
-                        (Map.insertWith (++) imp.mod [imp.mod] acc)
-                        (\alias -> Map.insertWith (++) alias [imp.mod] acc)
-                        imp.alias
-                  )
-                  Map.empty
-                  imports
-
 getExportedNames' ::
-  (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
   ModuleText ->
-  ([ExportedName], ExportIndex)
+  ([ExportedDecl], ExportIndex)
 getExportedNames' prgIndex exportIndex inProgress modName
   | modName `Set.member` inProgress = ([], exportIndex)
   | Just exports <- Map.lookup modName exportIndex = (exports, exportIndex)
   | Just prg <- Map.lookup modName prgIndex = getExportedNamesFromPrg prg
   | otherwise = ([], exportIndex)
  where
-  getExportedNamesFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedName], ExportIndex)
+  getExportedNamesFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedDecl], ExportIndex)
   getExportedNamesFromPrg prg =
     let declaredNames = getDeclaredNames modName prg
         inProgress' = Set.insert modName inProgress
@@ -169,8 +146,7 @@ getExportedNames' prgIndex exportIndex inProgress modName
               aliasModMap = getAliasModMap prg.imports
 
               reExportedAliases = (.mod) <$> exportItemMods exportLst
-              reExportedMods = Set.fromList $
-                join $ mapMaybe (\alias -> Map.lookup alias aliasModMap) reExportedAliases
+              reExportedMods = modsFromAliases aliasModMap reExportedAliases
               requiredImports =
                 if null transitiveReexportNames
                   then
@@ -210,11 +186,11 @@ getExportedNames' prgIndex exportIndex inProgress modName
              in
               (exportedNames, updateExportIdxWithSelf)
 
-getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedName]
+getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedDecl]
 getDeclaredNames mod prg =
   fmap (declToExportedName mod) prg.decls
 
-getGlobalAvailableNames :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblNameInfo]
+getGlobalAvailableNames :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
 getGlobalAvailableNames availPrgs exportIdx thisPrg =
   let declaredNames =
         maybe
@@ -226,10 +202,12 @@ getGlobalAvailableNames availPrgs exportIdx thisPrg =
       (importedNames, _) = getManyImportNames availPrgs exportIdx thisPrg.imports
    in declaredNames <> importedNames
 
-availableNamesToScope :: [GlblNameInfo] -> Scope
-availableNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
+-- | From a list of annotated declarations, attempt to build a scope - will try to
+-- merge associated declarations together (e.g. a type signature and multiple binds)
+globalNamesToScope :: [GlblDeclInfo] -> Scope
+globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
  where
-  indexNameInfo :: Scope -> GlblNameInfo -> Scope
+  indexNameInfo :: Scope -> GlblDeclInfo -> Scope
   indexNameInfo scope availName =
     let nameKey = availName.name
         originatingMod = availName.originatingMod
