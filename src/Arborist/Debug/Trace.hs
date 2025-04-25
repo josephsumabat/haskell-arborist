@@ -1,6 +1,8 @@
 module Arborist.Debug.Trace (
   traceShowPretty,
   traceShowMPretty,
+  traceWhen,
+  traceIdWhen,
 )
 where
 
@@ -13,3 +15,11 @@ traceShowPretty p v = trace (Text.unpack . pShowNoColor $ p) v
 
 traceShowMPretty :: (Show a, Applicative f) => a -> f ()
 traceShowMPretty p = traceM (Text.unpack . pShowNoColor $ p)
+
+traceWhen :: (Show s) => Bool -> s -> a -> a
+traceWhen cond p v =
+  if cond then traceShowPretty p v else v
+
+traceIdWhen :: (Show a) => Bool -> a -> a 
+traceIdWhen cond v =
+  if cond then traceShowPretty v v else v
