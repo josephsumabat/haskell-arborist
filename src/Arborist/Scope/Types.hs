@@ -138,6 +138,7 @@ type ScopeChanger =
     AST.:+ AST.LetP
     AST.:+ AST.BindP
     AST.:+ AST.AlternativeP
+    AST.:+ AST.LambdaP
     AST.:+ AST.Nil
 
 type DoBind =

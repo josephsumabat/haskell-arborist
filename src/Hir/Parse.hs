@@ -545,6 +545,17 @@ parseFunctionParams pats =
       Just (AST.Inj @H.WildcardP _) -> ParamWildcard
       _ -> ParamOther
 
+parsePatterns :: H.PatternsP -> [Pattern]
+parsePatterns pats =
+  let mPatsU = (eitherToMaybe $ AST.unwrap pats)
+   in
+    maybe [] getPats mPatsU
+  where
+    getPats :: H.PatternsUP -> [Pattern]
+    getPats patsU =
+      parsePattern <$>
+        Maybe.mapMaybe (AST.cast @H.PatternP) pats.dynNode.nodeChildren
+
 parsePattern :: H.PatternP -> Pattern
 parsePattern pat =
   Pattern

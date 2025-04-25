@@ -73,5 +73,9 @@ getScope availPrgs exportIdx n !scopeStack =
                 Just (AST.Inj @AST.PatternP patNode) -> addLocalPatVars currScope (Hir.parsePattern patNode) : scopeStack
                 Just _ -> scopeStack
                 Nothing -> scopeStack
+        Just (AST.Inj @(AST.LambdaP) lambdaNode) ->
+          let mPats = (.patterns) <$> (eitherToMaybe $ AST.unwrap lambdaNode)
+              pats = maybe [] Hir.parsePatterns mPats in
+              addManyLocalPatVars currScope pats : scopeStack
         Just _ -> scopeStack
         Nothing -> scopeStack

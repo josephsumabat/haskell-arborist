@@ -1,4 +1,5 @@
 module Arborist.Scope.Local (
+  addManyLocalPatVars,
   addLocalLetBinds,
   addLocalWhereBinds,
   addParam,
@@ -16,6 +17,13 @@ import Data.Text qualified as T
 import Debug.Trace
 import Hir
 import Hir.Types qualified as Hir
+
+addManyLocalPatVars :: Scope -> [Hir.Pattern] -> Scope
+addManyLocalPatVars currScope pats =
+   List.foldl'
+        addLocalPatVars
+        currScope
+        (reverse pats) -- Reverse for efficiency
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =
