@@ -129,8 +129,7 @@ renamePrg availPrgs exportIdx prg =
   resolveDoChild (renamerEnv, renamedChildren) n =
     let !newScope = getScope availPrgs exportIdx n renamerEnv.scope
         !newRenamerEnv = renamerEnv {scope = newScope}
-     in
-        (newRenamerEnv, go renamerEnv n : renamedChildren)
+     in (newRenamerEnv, go renamerEnv n : renamedChildren)
 
   getImportModName :: Hir.Import -> Hir.ModuleText
   getImportModName imp = fromMaybe imp.mod imp.alias

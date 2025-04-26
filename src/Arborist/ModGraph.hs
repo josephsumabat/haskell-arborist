@@ -49,7 +49,6 @@ indexImports ::
 indexImports prgs thisPrg modFileMap maxDepth = do
   let requiredFilesWithSrc =
         getModFiles modFileMap ((.mod) <$> thisPrg.imports)
-  -- traceShowM thisPrg.mod
   (importedPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
   allPrgs <-
     foldl'
