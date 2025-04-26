@@ -105,57 +105,57 @@ renamePrg availPrgs exportIdx prg =
           , scope = initialScope
           , aliasModMap = getAliasModMap prg.imports
           }
-   in AST.cast @HaskellR (go renamerEnv Nothing prg.node.dynNode)
+   in AST.cast @HaskellR (go renamerEnv prg.node.dynNode)
  where
-  go :: RenamerEnv -> Maybe AST.DynNode -> AST.DynNode -> AST.DynNode
-  go renamerEnv parent n =
+  go :: RenamerEnv -> AST.DynNode -> AST.DynNode
+  go renamerEnv n =
     case AST.cast @AST.DoP n of
       Nothing ->
         let !newScope = getScope availPrgs exportIdx n renamerEnv.scope
             !newRenamerEnv = renamerEnv {scope = newScope}
-            !newChildren = go newRenamerEnv (Just n) <$> n.nodeChildren
-         in (resolveNode renamerEnv parent n) {AST.nodeChildren = newChildren}
+            !newChildren = go newRenamerEnv <$> n.nodeChildren
+         in (resolveNode renamerEnv n) {AST.nodeChildren = newChildren}
       -- do node is a special case since statements are in scope for all
       -- subsequent statements
       Just _doNode ->
         let (_, reversedChildren) =
-              List.foldl' (resolveDoChild n) (renamerEnv, []) n.nodeChildren
+              List.foldl' resolveDoChild (renamerEnv, []) n.nodeChildren
             newChildren = reverse reversedChildren
-         in (resolveNode renamerEnv parent n) {AST.nodeChildren = newChildren}
+         in (resolveNode renamerEnv n) {AST.nodeChildren = newChildren}
 
   -- Special case for do notation
-  -- up to the caller to reverse
-  resolveDoChild :: AST.DynNode -> (RenamerEnv, [AST.DynNode]) -> AST.DynNode -> (RenamerEnv, [AST.DynNode])
-  resolveDoChild parent (renamerEnv, renamedChildren) n =
+  -- we prepend in reverse order for efficiency - up to the caller to reverse
+  resolveDoChild :: (RenamerEnv, [AST.DynNode]) -> AST.DynNode -> (RenamerEnv, [AST.DynNode])
+  resolveDoChild (renamerEnv, renamedChildren) n =
     let !newScope = getScope availPrgs exportIdx n renamerEnv.scope
         !newRenamerEnv = renamerEnv {scope = newScope}
-     in -- traceShowPretty (head newScope).lclVarInfo $
-        (newRenamerEnv, go renamerEnv (Just parent) n : renamedChildren)
+     in
+        (newRenamerEnv, go renamerEnv n : renamedChildren)
 
   getImportModName :: Hir.Import -> Hir.ModuleText
   getImportModName imp = fromMaybe imp.mod imp.alias
 
-  resolveNode :: RenamerEnv -> Maybe AST.DynNode -> AST.DynNode -> AST.DynNode
-  resolveNode renamerEnv parent n =
+  resolveNode :: RenamerEnv -> AST.DynNode -> AST.DynNode
+  resolveNode renamerEnv n =
     case AST.cast @Resolveable n of
       Just (AST.Inj @(AST.NameP) nameNode) ->
         AST.getDynNode $ AST.modifyNameExt @RenamePhase nameNode (\_ -> NoNameFound)
       Just (AST.Inj @(AST.VariableP) node) ->
-        let resolvedName = resolveVarName renamerEnv parent node
+        let resolvedName = resolveVarName renamerEnv node
             result = AST.getDynNode $ AST.modifyVariableExt @RenamePhase node (\_ -> resolvedName)
          in result
       Just _ -> n
       Nothing -> n
 
   -- Lookup a var name
-  resolveVarName :: RenamerEnv -> (Maybe AST.DynNode) -> AST.VariableP -> ResolvedVariable
-  resolveVarName renamerEnv parent varP =
+  resolveVarName :: RenamerEnv -> AST.VariableP -> ResolvedVariable
+  resolveVarName renamerEnv varP =
     case renamerEnv.scope of
       [] -> NoVarFound
       (currScope : _) -> handle currScope
    where
-    fieldParent = parent >>= AST.cast @AST.FieldNameP >>= (eitherToMaybe . AST.unwrap)
-    qualifiedParent = parent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap)
+    fieldParent = varP.dynNode.nodeParent >>= AST.cast @AST.FieldNameP >>= (eitherToMaybe . AST.unwrap)
+    qualifiedParent = varP.dynNode.nodeParent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap)
 
     handle :: Scope -> ResolvedVariable
     handle currScope
