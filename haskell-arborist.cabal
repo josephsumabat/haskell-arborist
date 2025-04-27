@@ -82,6 +82,7 @@ library
       ScopedTypeVariables
       DataKinds
       EmptyCase
+      TupleSections
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
   build-depends:
       aeson
@@ -140,6 +141,7 @@ executable haskell-arborist
       ScopedTypeVariables
       DataKinds
       EmptyCase
+      TupleSections
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates
   build-depends:
       aeson
@@ -200,6 +202,7 @@ test-suite haskell-arborist-test
       ScopedTypeVariables
       DataKinds
       EmptyCase
+      TupleSections
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
   build-depends:
       aeson

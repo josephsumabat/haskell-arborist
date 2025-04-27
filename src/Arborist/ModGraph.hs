@@ -2,6 +2,7 @@
 
 module Arborist.ModGraph (gatherScopeDeps, ProgramIndex, prgsToMap) where
 
+import Arborist.Debug.Trace
 import Arborist.Exports
 import Arborist.Files
 import Arborist.ProgramIndex
@@ -106,11 +107,11 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
               Just exports ->
                 let
                   reExportedAliases = (.mod) <$> exportItemMods exports
-                  aliasModMap = getAliasModMap prg.imports
+                  aliasModMap = getAliasModMap prg
                   reExportedMods = modsFromAliases aliasModMap reExportedAliases
                   allImportMods = (.mod) <$> prg.imports
                   exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) prg.imports
-                  transitiveNames = getTransitiveReExports prg exports
+                  transitiveNames = getTransitiveReExportNames prg exports
                   req =
                     if Set.null transitiveNames
                       then exportedMods
@@ -154,6 +155,7 @@ getPrgs prgs hsFiles =
         fileExists <- Dir.doesFileExist file
         if fileExists
           then do
+            traceShowMPretty file
             fileContents <- T.decodeUtf8 <$> BS.readFile file
             let (_src, !prg) = parsePrg fileContents
                 !parsedList' = (modText, prg) : parsedList

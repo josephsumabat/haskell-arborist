@@ -25,6 +25,7 @@ import Data.Either
 import Data.HashMap.Lazy qualified as Map
 import Data.LineCol
 import Data.LineColRange
+import Data.List qualified as List
 import Data.Maybe (catMaybes, fromJust)
 import Data.Pos
 import Data.Text.Encoding qualified as TE
@@ -972,29 +973,29 @@ main = do
             ]
           ) ::
             [String]
-    let onlySrc = ["../mercury-web-backend/src"]
-    let targetFile = ["../mercury-web-backend/src/Handler/Security.hs"]
-        targetMod = "Handler.Security"
-    let src = srcWithLps
     modFileMap <- buildModuleFileMap srcWithLps
+    let onlySrc = ["../mercury-web-backend/src"]
+    let targetMod = parseModuleTextFromText "Mercury.Risk.Score"
+        targetFile = maybe [] List.singleton (Map.lookup targetMod modFileMap)
+    let src = srcWithLps
 
     hsFiles <- getAllHsFiles src
     -- mapM_ putStrLn hsFiles
 
     -- allPrgs <- lazyGetPrgs hsFiles
     justTarget <- lazyGetPrgs targetFile
-    let Just target = Map.lookup (parseModuleTextFromText targetMod) justTarget
+    let Just target = Map.lookup targetMod justTarget
     requiredPrograms <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 2)
-    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Handler.Util")
+    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Mercury.Persistent.Operation")
     -- let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     -- let renameTree = renamePrg allPrgs Map.empty target
     let renameTree = renamePrg requiredPrograms Map.empty target
     let debugTreeStr = fromJust $ (debugTree . (.dynNode)) <$> renameTree
     let loc = point (LineCol (mkPos 87) (mkPos 29))
     let chosenNode = (getDeepestContainingLineCol @(AST.Variable RenamePhase) loc) . (.dynNode) =<< renameTree
-    -- traceShowM (length (Map.keys requiredPrograms))
+    -- traceShowM ((Map.lookup (parseModuleTextFromText "Mercury.Persistent.Operation") requiredPrograms))
     -- traceShowM (length (Map.keys allPrgs))
-    -- traceM $ Text.unpack . pShowNoColor $ (fst exportIdx2)
+    traceM $ Text.unpack . pShowNoColor $ (fst exportIdx2)
     -- traceM $ Text.unpack . pShowNoColor $ availableNamesToScope $ (filter (\g -> g.originatingMod == parseModuleTextFromText "Import.Handler") glblAvail)
 
     -- benchmarkMain modIndex debugAllTreeStr prgs

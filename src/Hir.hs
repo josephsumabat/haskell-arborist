@@ -44,10 +44,10 @@ exportItemMods exports =
   exportItemToMod (ExportModuleItem mod) = Just mod
   exportItemToMod _ = Nothing
 
-exportItemNames :: [ExportItem] -> [Name]
+exportItemNames :: [ExportItem] -> [Qualified]
 exportItemNames exports =
   mapMaybe exportItemToName exports
  where
-  exportItemToName :: ExportItem -> Maybe Name
-  exportItemToName (ExportItem {name}) = Just name.name
+  exportItemToName :: ExportItem -> Maybe Qualified
+  exportItemToName (ExportItem {name}) = Just name
   exportItemToName _ = Nothing

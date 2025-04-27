@@ -12,6 +12,7 @@ where
 
 import AST qualified
 import AST.Haskell qualified as AST
+import Arborist.Debug.Trace
 import Arborist.Exports
 import Arborist.ModGraph
 import Arborist.Scope
@@ -103,7 +104,7 @@ renamePrg availPrgs exportIdx prg =
           { qualifiedImports
           , unqualifiedImports = maybe unqualifiedImports (`Set.insert` unqualifiedImports) prg.mod
           , scope = initialScope
-          , aliasModMap = getAliasModMap prg.imports
+          , aliasModMap = getAliasModMap prg
           }
    in AST.cast @HaskellR (go renamerEnv prg.node.dynNode)
  where

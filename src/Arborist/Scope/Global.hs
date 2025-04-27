@@ -141,12 +141,12 @@ getExportedNames' prgIndex exportIndex inProgress modName
              in (declaredNames, exportIdxWithSelf)
           Just exportLst ->
             let
-              exportNamesSet = Set.fromList $ (.node.nodeText) <$> exportItemNames exportLst
-              transitiveReexportNames = getTransitiveReExports prg exportLst
-              aliasModMap = getAliasModMap prg.imports
+              transitiveReexportNames = getTransitiveReExportNames prg exportLst
+              aliasModMap = getAliasModMap prg
 
               reExportedAliases = (.mod) <$> exportItemMods exportLst
-              reExportedMods = modsFromAliases aliasModMap reExportedAliases
+              reExportedMods =
+                modsFromAliases aliasModMap reExportedAliases
               requiredImports =
                 if null transitiveReexportNames
                   then
@@ -158,33 +158,27 @@ getExportedNames' prgIndex exportIndex inProgress modName
               (allImportedNames, updatedExportIdx) =
                 getManyImportNames' prgIndex exportIndex inProgress' requiredImports
 
-              transitiveReexportNamesInfo =
-                filter
-                  ( \expInfo ->
-                      expInfo.name `Set.member` exportNamesSet
-                  )
-                  allImportedNames
+              declaredNamesInfo = exportToInfo modName False <$> declaredNames
+              allAvailableNames =
+                declaredNamesInfo
+                  <> allImportedNames
 
               moduleExports =
                 filter
                   ( \expInfo ->
                       expInfo.importedFrom `Set.member` reExportedMods
                   )
-                  allImportedNames
+                  allAvailableNames
 
-              selfExports =
-                if modName `Set.member` reExportedMods
-                  then declaredNames
-                  else filter (\expInfo -> expInfo.name `Set.member` exportNamesSet) declaredNames
+              nameExports =
+                getNameExportInfo aliasModMap allAvailableNames exportLst
 
-              exportedNames =
-                (infoToExport <$> moduleExports)
-                  <> (infoToExport <$> transitiveReexportNamesInfo)
-                  <> selfExports
+              allExportedNames =
+                infoToExport <$> (nameExports <> moduleExports)
 
-              updateExportIdxWithSelf = Map.insert modName exportedNames updatedExportIdx
+              updateExportIdxWithSelf = Map.insert modName allExportedNames updatedExportIdx
              in
-              (exportedNames, updateExportIdxWithSelf)
+              (allExportedNames, updateExportIdxWithSelf)
 
 getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedDecl]
 getDeclaredNames mod prg =

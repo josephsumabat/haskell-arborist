@@ -73,6 +73,9 @@ data ModuleName = ModuleName
 instance Eq ModuleName where
   (==) = (==) `on` (.mod)
 
+instance Ord ModuleName where
+  compare a b = compare a.mod b.mod
+
 instance Hashable ModuleName where
   hashWithSalt salt ModuleName {mod} = hashWithSalt salt mod
 

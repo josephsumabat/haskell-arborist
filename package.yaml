@@ -60,6 +60,7 @@ default-extensions:
 - ScopedTypeVariables
 - DataKinds
 - EmptyCase
+- TupleSections
 
 ghc-options:
   - -Wall
