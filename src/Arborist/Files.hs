@@ -6,6 +6,7 @@ import Data.Maybe
 import Hir.Types qualified as Hir
 import ModUtils
 import System.Directory (doesDirectoryExist, listDirectory)
+import System.Directory.Extra
 import System.FilePath (takeExtension, (</>))
 
 type ModFileMap = Map.HashMap Hir.ModuleText FilePath
@@ -40,11 +41,15 @@ getAllHsFiles dirs = do
         )
 
 -- | Get all .hs files recursively from a given directory
+-- Note: does not follow symbolic links beyond the initial level for
+-- optimization purposes
 getHsFiles :: FilePath -> IO [FilePath]
 getHsFiles dir = do
   contents <- listDirectory dir
   let paths = map (dir </>) contents
   dirs <- filterM doesDirectoryExist paths
+  -- Don't follow symbolic links beyond the first level
+  dirs' <- filterM ((fmap not) . pathIsSymbolicLink) dirs
   let files = filter (\f -> takeExtension f == ".hs") paths
-  subFiles <- fmap concat $ forM dirs getHsFiles
+  subFiles <- fmap concat $ forM dirs' getHsFiles
   return (files ++ subFiles)

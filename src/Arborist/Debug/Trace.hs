@@ -3,10 +3,12 @@ module Arborist.Debug.Trace (
   traceShowMPretty,
   traceWhen,
   traceIdWhen,
+  time,
 )
 where
 
 import Data.Text.Lazy qualified as Text
+import Data.Time
 import Debug.Trace
 import Text.Pretty.Simple
 
@@ -23,3 +25,11 @@ traceWhen cond p v =
 traceIdWhen :: (Show a) => Bool -> a -> a
 traceIdWhen cond v =
   if cond then traceShowPretty v v else v
+
+time :: [Char] -> IO a -> IO a
+time label fn = do
+  start <- getCurrentTime
+  res <- fn
+  end <- getCurrentTime
+  putStrLn $ "Time to run " <> label <> ": " ++ show (diffUTCTime end start)
+  pure res

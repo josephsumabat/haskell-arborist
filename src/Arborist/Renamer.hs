@@ -223,5 +223,5 @@ renamePrg availPrgs exportIdx prg =
     collectUnqualified acc (modName, varInfos)
       | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
       | otherwise = acc
-    
+
     collectQualified acc (_modName, varInfos) = varInfos ++ acc
