@@ -166,7 +166,8 @@ getExportedNames' prgIndex exportIndex inProgress modName
               moduleExports =
                 filter
                   ( \expInfo ->
-                      expInfo.importedFrom `Set.member` reExportedMods
+                      (expInfo.importedFrom `Set.member` reExportedMods)
+                        && (not expInfo.requiresQualifier)
                   )
                   allAvailableNames
 

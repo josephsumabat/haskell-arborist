@@ -25,6 +25,9 @@ getScope availPrgs exportIdx n !scopeStack =
               availableNames = getGlobalAvailableNames availPrgs exportIdx prg
               modScope = globalNamesToScope availableNames
            in modScope : scopeStack
+        -- import lists do not use the global program scope
+        Just (AST.Inj @(AST.ImportP) _importNode) ->
+          emptyScope : scopeStack
         Just (AST.Inj @(AST.FunctionP) fnNode) ->
           -- Add local params when encountering a function node
           let params = (Hir.parseFunction fnNode).params

@@ -133,6 +133,7 @@ data Scope = Scope
 -- | Nodes which change the scope
 type ScopeChanger =
   AST.HaskellP
+    AST.:+ AST.ImportP
     AST.:+ AST.FunctionP
     AST.:+ AST.LetInP
     AST.:+ AST.LetP

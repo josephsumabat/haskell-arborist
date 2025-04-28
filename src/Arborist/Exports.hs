@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 module Arborist.Exports (
   getTransitiveReExportNames,
   getNameExportInfo,
@@ -46,16 +48,27 @@ getNameExportInfo aliasModMap availNames exports =
   let exportSet = getSearchableExportSet exports
    in filter
         ( \info ->
-            let imp = searchableInfo info
-             in (info.name, imp) `Set.member` exportSet
+            let possibleNames = allPossibleNames info
+             in any (`Set.member` exportSet) possibleNames
         )
         availNames
  where
-  -- If a name comes from this module then it will be handled as `Nothing` in the export set
-  searchableInfo info =
-    if info.importedFrom == info.originatingMod
-      then Nothing
-      else Just info.importedFrom
+  -- Possible names that could be exported with a qualifier
+  allPossibleNames :: GlblDeclInfo -> [(T.Text, Maybe ModuleText)]
+  allPossibleNames info =
+    let name = info.name
+        imported = info.importedFrom
+        aliases = fromMaybe [imported] (Map.lookup imported aliasModMap)
+
+        -- If the name is imported unqualified, allow unqualified matches
+        unqualified =
+          if info.requiresQualifier
+            then [] -- imported qualified: no unqualified match allowed
+            else [(name, Nothing)]
+
+        -- Always allow matching against all possible module aliases
+        qualifieds = (name,) . Just <$> aliases
+     in unqualified ++ qualifieds
 
   -- A special searchable export set that handles qualifiers and module self-exports
   getSearchableExportSet exports =

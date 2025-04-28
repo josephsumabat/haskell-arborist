@@ -975,7 +975,7 @@ main = do
             [String]
     modFileMap <- buildModuleFileMap srcWithLps
     let onlySrc = ["../mercury-web-backend/src"]
-    let targetMod = parseModuleTextFromText "Mercury.Risk.Score"
+    let targetMod = parseModuleTextFromText "Import.NoFoundation"
         targetFile = maybe [] List.singleton (Map.lookup targetMod modFileMap)
     let src = srcWithLps
 
@@ -986,7 +986,7 @@ main = do
     justTarget <- lazyGetPrgs targetFile
     let Just target = Map.lookup targetMod justTarget
     requiredPrograms <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 2)
-    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Mercury.Persistent.Operation")
+    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Mercury.Esqueleto")
     -- let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     -- let renameTree = renamePrg allPrgs Map.empty target
     let renameTree = renamePrg requiredPrograms Map.empty target
