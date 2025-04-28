@@ -12,7 +12,6 @@ where
 
 import AST qualified
 import AST.Haskell qualified as AST
-import Arborist.Debug.Trace
 import Arborist.Exports
 import Arborist.ModGraph
 import Arborist.Scope
@@ -207,7 +206,7 @@ renamePrg availPrgs exportIdx prg =
           Nothing ->
             tryMergeGlblVarInfo $
               filter (\varInfo -> not varInfo.requiresQualifier) $
-                List.foldl' collect [] (Map.toList modVarMap)
+                List.foldl' collectUnqualified [] (Map.toList modVarMap)
           Just q ->
             let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
                 mMods =
@@ -219,8 +218,10 @@ renamePrg availPrgs exportIdx prg =
                     ( \varInfo ->
                         any (`NESet.member` varInfo.importedFrom) mMods
                     )
-                  $ List.foldl' collect [] (Map.toList modVarMap)
+                  $ List.foldl' collectQualified [] (Map.toList modVarMap)
    where
-    collect acc (modName, varInfos)
+    collectUnqualified acc (modName, varInfos)
       | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
       | otherwise = acc
+    
+    collectQualified acc (_modName, varInfos) = varInfos ++ acc

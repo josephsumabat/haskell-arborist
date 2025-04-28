@@ -18,7 +18,6 @@ import Data.HashMap.Strict qualified as Map
 import Data.List qualified as List
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Debug.Trace
 import Hir
 import Hir.Types (ModuleText)
 import Hir.Types qualified as Hir

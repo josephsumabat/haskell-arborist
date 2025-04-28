@@ -2,29 +2,22 @@
 
 module Arborist.ModGraph (gatherScopeDeps, ProgramIndex, prgsToMap) where
 
-import Arborist.Debug.Trace
 import Arborist.Exports
 import Arborist.Files
 import Arborist.ProgramIndex
-import Arborist.Scope.Global
 import Control.Error
-import Control.Exception
 import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Foldable
 import Data.HashMap.Lazy qualified as Map
-import Data.Hashable
 import Data.List qualified as List
 import Data.Set qualified as Set
-import Data.Text qualified as T
 import Data.Text.Encoding qualified as T
-import Data.Text.IO qualified as T
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
 import Hir.Types
 import Hir.Types qualified as Hir
-import ModUtils
 import System.Directory qualified as Dir
 
 -- | Find all dependencies required to resolve a given module and add them to a `ProgramIndex`
@@ -155,7 +148,7 @@ getPrgs prgs hsFiles =
         fileExists <- Dir.doesFileExist file
         if fileExists
           then do
-            traceShowMPretty file
+            -- traceShowMPretty file
             fileContents <- T.decodeUtf8 <$> BS.readFile file
             let (_src, !prg) = parsePrg fileContents
                 !parsedList' = (modText, prg) : parsedList

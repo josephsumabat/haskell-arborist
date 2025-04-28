@@ -14,7 +14,6 @@ import Data.Hashable
 import Data.List qualified as List
 import Data.Maybe
 import Data.Text qualified as T
-import Debug.Trace
 import Hir qualified
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
@@ -59,7 +58,7 @@ indexPrgHaddocks haddockIndex prg =
           declHaddocks =
             maybe
               haddockIndex
-              (\decls -> traceShow decls.dynNode.nodeChildren $ step initialHaddock mod decls.dynNode.nodeChildren)
+              (\decls -> step initialHaddock mod decls.dynNode.nodeChildren)
               mDeclarationsU
        in declHaddocks
 

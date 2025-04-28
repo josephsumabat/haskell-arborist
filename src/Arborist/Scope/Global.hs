@@ -4,6 +4,10 @@ module Arborist.Scope.Global (
   globalNamesToScope,
   getGlobalAvailableNames,
   ExportIndex,
+  declToNameInfo,
+  declToExportedName,
+  exportToInfo,
+  infoToExport,
 )
 where
 
@@ -138,7 +142,8 @@ getExportedNames' prgIndex exportIndex inProgress modName
      in case prg.exports of
           Nothing ->
             let exportIdxWithSelf = Map.insert modName declaredNames exportIndex
-             in (declaredNames, exportIdxWithSelf)
+             in
+             (declaredNames, exportIdxWithSelf)
           Just exportLst ->
             let
               transitiveReexportNames = getTransitiveReExportNames prg exportLst
