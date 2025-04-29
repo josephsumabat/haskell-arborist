@@ -32,9 +32,9 @@ getScope availPrgs exportIdx n !scopeStack =
           -- Add local params when encountering a function node
           let params = (Hir.parseFunction fnNode).params
               mWhereBinds = (eitherToMaybe $ AST.unwrap fnNode) >>= (.binds)
-              curScope = fromMaybe emptyScope (headMay scopeStack)
+              currScope = fromMaybe emptyScope (headMay scopeStack)
               scopeWithParams =
-                List.foldl' addParam curScope params
+                addManyLocalPatVars currScope params
               scopeWithBinds =
                 case mWhereBinds of
                   Nothing -> scopeWithParams : scopeStack

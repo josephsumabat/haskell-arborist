@@ -427,6 +427,7 @@ main = do
     let targetMod = parseModuleTextFromText "Client.Sql"
         targetFile = maybe [] List.singleton (Map.lookup targetMod modFileMap)
     let src = srcWithLps
+    traceShowMPretty modFileMap
 
     hsFiles <- getAllHsFiles src
     -- mapM_ putStrLn hsFiles

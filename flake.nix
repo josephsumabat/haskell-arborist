@@ -47,6 +47,7 @@
           cabal-install
           hpack
           alejandra
+          cabal2nix
         ];
         inputsFrom = [self.packages.${system}.${packageName}.env];
         shellHook = "PS1=\"[haskell-arborist:\\w]$ \"";

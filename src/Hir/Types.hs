@@ -233,7 +233,7 @@ data ThQuotedName = ThQuotedName
 
 data FunctionBind = FunctionBind
   { fnName :: Text
-  , params :: [Param]
+  , params :: [Pattern]
   }
   deriving (Show, Eq)
 
@@ -251,6 +251,7 @@ data Param
 data Pattern = Pattern
   { patVars :: [Variable]
   }
+  deriving (Show, Eq)
 
 data Variable = Variable
   { name :: Text

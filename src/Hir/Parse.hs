@@ -517,33 +517,13 @@ parseFunction fnNode =
   let mFnU = eitherToMaybe $ AST.unwrap fnNode
       name = maybe "" (nodeText . AST.getDynNode) mFnU
       mParams = mFnU >>= (.patterns)
-      fnParams = maybe [] parseFunctionParams mParams
+      fnParams = maybe [] parsePatterns mParams
    in FunctionBind
         { fnName = name
         , params = fnParams
         }
 
 type ToParam = H.VariableP :+ H.WildcardP :+ AST.Nil
-
-parseFunctionParams :: H.PatternsP -> [Param]
-parseFunctionParams pats =
-  let mPatU = eitherToMaybe $ AST.unwrap pats
-   in case mPatU of
-        Nothing -> []
-        Just patU ->
-          NE.toList $ (toParam . AST.getDynNode) <$> patU.children
- where
-  toParam :: DynNode -> Param
-  toParam node =
-    case AST.cast @ToParam node of
-      Just (AST.Inj @H.VariableP node) ->
-        ParamVar $
-          Variable
-            { name = node.dynNode.nodeText
-            , dynNode = node.dynNode
-            }
-      Just (AST.Inj @H.WildcardP _) -> ParamWildcard
-      _ -> ParamOther
 
 parsePatterns :: H.PatternsP -> [Pattern]
 parsePatterns pats =
