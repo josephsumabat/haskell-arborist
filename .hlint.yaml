@@ -94,3 +94,4 @@
 - ignore: {name: Move brackets to avoid $}
 - ignore: {name: Use mapMaybe}
 - ignore: {name: Use list comprehension}
+- ignore: {name: Redundant if}

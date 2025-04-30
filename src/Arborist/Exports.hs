@@ -41,45 +41,24 @@ getAliasModMap prg =
         withSelf
         imports
 
--- | Get all name infos that are explicitly exported by name
-getNameExportInfo :: AliasModMap -> [GlblDeclInfo] -> [Hir.ExportItem] -> [GlblDeclInfo]
-getNameExportInfo aliasModMap availNames exports =
+getNameExportInfo :: [GlblDeclInfo] -> [Hir.ExportItem] -> [GlblDeclInfo]
+getNameExportInfo availNames exports =
   let exportSet = getSearchableExportSet exports
-   in filter
-        ( \info ->
-            let possibleNames = allPossibleNames info
-             in any (`Set.member` exportSet) possibleNames
-        )
-        availNames
+   in filter (\info -> any (`Set.member` exportSet) (lookupKeys info)) availNames
  where
-  -- Possible names that could be exported with a qualifier
-  allPossibleNames :: GlblDeclInfo -> [(T.Text, Maybe ModuleText)]
-  allPossibleNames info =
+  -- Try both unqualified and qualified keys if unqualified is allowed
+  lookupKeys :: GlblDeclInfo -> [(T.Text, Maybe ModuleText)]
+  lookupKeys info =
     let name = info.name
-        imported = info.importedFrom
-        aliases = fromMaybe [imported] (Map.lookup imported aliasModMap)
+        qual = Just info.moduleNamespace
+     in if info.requiresQualifier
+          then [(name, qual)]
+          else [(name, Nothing), (name, qual)]
 
-        -- If the name is imported unqualified, allow unqualified matches
-        unqualified =
-          if info.requiresQualifier
-            then [] -- imported qualified: no unqualified match allowed
-            else [(name, Nothing)]
-
-        -- Always allow matching against all possible module aliases
-        qualifieds = (name,) . Just <$> aliases
-     in unqualified ++ qualifieds
-
-  -- A special searchable export set that handles qualifiers and module self-exports
-  getSearchableExportSet exports =
-    Set.fromList $
-      ( \qual ->
-          let potentialMods =
-                case qual.mod of
-                  Nothing -> [Nothing]
-                  Just mod -> Just <$> fromMaybe [] (Map.lookup mod.mod aliasModMap)
-           in (qual.name.node.nodeText,) <$> potentialMods
-      )
-        =<< exportItemNames exports
+  getSearchableExportSet :: [Hir.ExportItem] -> Set.Set (T.Text, Maybe ModuleText)
+  getSearchableExportSet = Set.fromList . map toPair . exportItemNames
+    where
+      toPair qual = (qual.name.node.nodeText, (.mod) <$> qual.mod)
 
 -- | Get names that are not declared in the current program
 getTransitiveReExportNames :: Hir.Program -> [Hir.ExportItem] -> Set.Set T.Text

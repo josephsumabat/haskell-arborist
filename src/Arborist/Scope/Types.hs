@@ -19,6 +19,9 @@ data GlblDeclInfo = GlblDeclInfo
   , decl :: Decl
   , originatingMod :: ModuleText
   , importedFrom :: ModuleText
+  , -- | What alias was this imported under
+    -- can be the module itself if no alias is used
+    moduleNamespace :: ModuleText
   , requiresQualifier :: Bool
   }
   deriving (Show, Eq)
@@ -47,7 +50,7 @@ tryMergeGlblVarInfo =
   Map.elems . List.foldl' insert Map.empty
  where
   insert acc g =
-    Map.insertWith mergeOne (g.originatingMod, g.name, g.requiresQualifier) g acc
+    Map.insertWith mergeOne (g.originatingMod, g.name) g acc
 
   mergeOne g1 g2 =
     GlblVarInfo
@@ -57,7 +60,10 @@ tryMergeGlblVarInfo =
       , originatingMod = g1.originatingMod
       , name = g1.name
       , loc = min g1.loc g2.loc
-      , requiresQualifier = g1.requiresQualifier
+      , requiresQualifier =
+          if g1.requiresQualifier == g2.requiresQualifier
+             then g1.requiresQualifier
+             else False
       }
 
 data LocalVarInfo

@@ -4,7 +4,6 @@ module Arborist.Scope.Global (
   globalNamesToScope,
   getGlobalAvailableNames,
   ExportIndex,
-  declToNameInfo,
   declToExportedName,
   exportToInfo,
   infoToExport,
@@ -43,14 +42,15 @@ declToExportedName modName decl =
     , decl = decl
     }
 
-exportToInfo :: ModuleText -> Bool -> ExportedDecl -> GlblDeclInfo
-exportToInfo importedFrom qualified expName =
+exportToInfo :: ModuleText -> ModuleText -> Bool -> ExportedDecl -> GlblDeclInfo
+exportToInfo importedFrom moduleNamespace qualified expName =
   GlblDeclInfo
     { name = expName.name
     , decl = expName.decl
     , originatingMod = expName.mod
     , importedFrom = importedFrom
     , requiresQualifier = qualified
+    , moduleNamespace = moduleNamespace 
     }
 
 infoToExport :: GlblDeclInfo -> ExportedDecl
@@ -59,16 +59,6 @@ infoToExport glblInfo =
     { name = glblInfo.name
     , decl = glblInfo.decl
     , mod = glblInfo.originatingMod
-    }
-
-declToNameInfo :: ModuleText -> ModuleText -> Bool -> Decl -> GlblDeclInfo
-declToNameInfo originatingMod importedFrom qualified decl =
-  GlblDeclInfo
-    { name = (declName decl).node.nodeText
-    , originatingMod = originatingMod
-    , importedFrom = importedFrom
-    , requiresQualifier = qualified
-    , decl = decl
     }
 
 -- | Get all names exported by a given export.
@@ -98,8 +88,9 @@ getImportNames' ::
 getImportNames' prgIndex exportIndex inProgress thisImport =
   let qualified = thisImport.qualified
       mod = thisImport.mod
+      alias = fromMaybe thisImport.mod thisImport.alias
       (exportedNames, updatedExportIndex) = getExportedNames' prgIndex exportIndex inProgress mod
-      glblNameInfo = exportToInfo mod qualified <$> exportedNames
+      glblNameInfo = exportToInfo mod alias qualified <$> exportedNames
       importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> thisImport.importList
       importList
         | null importNames = glblNameInfo
@@ -162,7 +153,7 @@ getExportedNames' prgIndex exportIndex inProgress modName
               (allImportedNames, updatedExportIdx) =
                 getManyImportNames' prgIndex exportIndex inProgress' requiredImports
 
-              declaredNamesInfo = exportToInfo modName False <$> declaredNames
+              declaredNamesInfo = exportToInfo modName modName False <$> declaredNames
               allAvailableNames =
                 declaredNamesInfo
                   <> allImportedNames
@@ -170,13 +161,13 @@ getExportedNames' prgIndex exportIndex inProgress modName
               moduleExports =
                 filter
                   ( \expInfo ->
-                      (expInfo.importedFrom `Set.member` reExportedMods)
+                      (expInfo.moduleNamespace `Set.member` reExportedMods)
                         && (not expInfo.requiresQualifier)
                   )
                   allAvailableNames
 
               nameExports =
-                getNameExportInfo aliasModMap allAvailableNames exportLst
+                getNameExportInfo allAvailableNames exportLst
 
               allExportedNames =
                 infoToExport <$> (nameExports <> moduleExports)
@@ -195,7 +186,7 @@ getGlobalAvailableNames availPrgs exportIdx thisPrg =
         maybe
           []
           ( \modName ->
-              exportToInfo modName False <$> getDeclaredNames modName thisPrg
+              exportToInfo modName modName False <$> getDeclaredNames modName thisPrg
           )
           thisPrg.mod
       (importedNames, _) = getManyImportNames availPrgs exportIdx thisPrg.imports
