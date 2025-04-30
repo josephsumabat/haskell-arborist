@@ -31,7 +31,7 @@ data QualifiedName = QualifiedName
   deriving (Show, Eq)
 
 instance Hashable QualifiedName where
-  hashWithSalt s n = hashWithSalt s (n.mod.text <> n.name)
+  hashWithSalt s n = hashWithSalt s (n.mod.text, n.name)
 
 type HaddockIndex = Map.HashMap QualifiedName HaddockInfo
 

@@ -50,7 +50,7 @@ getNameExportInfo availNames exports =
   lookupKeys :: GlblDeclInfo -> [(T.Text, Maybe ModuleText)]
   lookupKeys info =
     let name = info.name
-        qual = Just info.moduleNamespace
+        qual = Just info.importedFrom.namespace
      in if info.requiresQualifier
           then [(name, qual)]
           else [(name, Nothing), (name, qual)]

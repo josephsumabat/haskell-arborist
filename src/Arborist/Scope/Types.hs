@@ -12,19 +12,31 @@ import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import Data.Hashable
 
 -- | An intermediate representation of a declaration annotated
 data GlblDeclInfo = GlblDeclInfo
   { name :: T.Text
   , decl :: Decl
   , originatingMod :: ModuleText
-  , importedFrom :: ModuleText
-  , -- | What alias was this imported under
-    -- can be the module itself if no alias is used
-    moduleNamespace :: ModuleText
+  , importedFrom :: ImportInfo
   , requiresQualifier :: Bool
   }
   deriving (Show, Eq)
+
+-- | A module namespace can be an alias or a real module
+type ModNamespace = ModuleText
+
+data ImportInfo =
+  ImportInfo
+    {
+      mod :: ModuleText
+    , namespace :: ModNamespace
+    }
+  deriving (Show,Eq, Ord)
+
+instance Hashable ImportInfo where
+  hashWithSalt s n = hashWithSalt s (n.mod.text, n.namespace.text)
 
 data VarType
   = VarSig Hir.SigDecl
@@ -33,7 +45,7 @@ data VarType
 data GlblVarInfo = GlblVarInfo
   { sig :: Maybe Hir.SigDecl
   , binds :: [Hir.BindDecl]
-  , importedFrom :: NES.NESet ModuleText
+  , importedFrom :: NES.NESet ImportInfo
   , originatingMod :: ModuleText
   , loc :: LineColRange
   , name :: Hir.Name
@@ -45,6 +57,8 @@ glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
 glblVarInfoToQualified glbl =
   QualifiedName glbl.originatingMod glbl.name.node.nodeText
 
+-- | Collect global var infos that have the same qualified name
+-- e.g. all global var infos with qualified name MyModule.fn1 will be collected
 tryMergeGlblVarInfo :: [GlblVarInfo] -> [GlblVarInfo]
 tryMergeGlblVarInfo =
   Map.elems . List.foldl' insert Map.empty
@@ -126,9 +140,10 @@ resolvedLclVarToLoc resolvedVar =
     VarInfoBind lclBind -> lclBind.dynNode.nodeLineColRange
 
 -- | Var infos for a name indexed by module
-type GlblVarInfoMap = Map.HashMap T.Text ModVarInfoMap
+-- TODO: change val to [GlblVarInfo]?
+type GlblVarInfoMap = Map.HashMap T.Text ImportVarInfoMap
 
-type ModVarInfoMap = Map.HashMap ModuleText [GlblVarInfo]
+type ImportVarInfoMap = Map.HashMap ImportInfo [GlblVarInfo]
 
 data Scope = Scope
   { glblVarInfo :: GlblVarInfoMap

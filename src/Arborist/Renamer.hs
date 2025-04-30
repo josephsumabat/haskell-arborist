@@ -29,6 +29,7 @@ import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
+import Arborist.Debug.Trace
 
 data RenamePhase
 
@@ -78,11 +79,11 @@ type HaskellR = AST.Haskell RenamePhase
 
 type Resolveable = AST.NameP AST.:+ AST.VariableP AST.:+ AST.Nil
 
+-- | Renamer state within a single module
 data RenamerEnv = RenamerEnv
-  { qualifiedImports :: Set.Set Hir.ModuleText
-  , unqualifiedImports :: Set.Set Hir.ModuleText
+  { qualifiedImports :: Set.Set ModNamespace
+  , unqualifiedImports :: Set.Set ModNamespace
   , scope :: [Scope]
-  , aliasModMap :: Map.HashMap Hir.ModuleText [Hir.ModuleText]
   }
   deriving (Show)
 
@@ -103,7 +104,6 @@ renamePrg availPrgs exportIdx prg =
           { qualifiedImports
           , unqualifiedImports = maybe unqualifiedImports (`Set.insert` unqualifiedImports) prg.mod
           , scope = initialScope
-          , aliasModMap = getAliasModMap prg
           }
    in AST.cast @HaskellR (go renamerEnv prg.node.dynNode)
  where
@@ -131,7 +131,7 @@ renamePrg availPrgs exportIdx prg =
         !newRenamerEnv = renamerEnv {scope = newScope}
      in (newRenamerEnv, go renamerEnv n : renamedChildren)
 
-  getImportModName :: Hir.Import -> Hir.ModuleText
+  getImportModName :: Hir.Import -> ModNamespace
   getImportModName imp = fromMaybe imp.mod imp.alias
 
   resolveNode :: RenamerEnv -> AST.DynNode -> AST.DynNode
@@ -201,27 +201,24 @@ renamePrg availPrgs exportIdx prg =
   getValidGlobalVarInfos renamerEnv currScope varName qualifier =
     case Map.lookup varName (currScope.glblVarInfo) of
       Nothing -> []
-      Just modVarMap ->
+      Just impVarMap ->
         case qualifier of
           Nothing ->
             tryMergeGlblVarInfo $
               filter (\varInfo -> not varInfo.requiresQualifier) $
-                List.foldl' collectUnqualified [] (Map.toList modVarMap)
+                List.foldl' collectUnqualified [] (Map.toList impVarMap)
           Just q ->
             let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
-                mMods =
-                  fromMaybe [] $
-                    mAliasName
-                      >>= \aliasName -> Map.lookup aliasName renamerEnv.aliasModMap
              in tryMergeGlblVarInfo
                   $ filter
                     ( \varInfo ->
-                        any (`NESet.member` varInfo.importedFrom) mMods
+                        let aliasSet = NESet.map (.namespace) varInfo.importedFrom in
+                        maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
                     )
-                  $ List.foldl' collectQualified [] (Map.toList modVarMap)
+                  $ List.foldl' collectQualified [] (Map.toList impVarMap)
    where
-    collectUnqualified acc (modName, varInfos)
-      | modName `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
+    collectUnqualified acc (impInfo, varInfos)
+      | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = varInfos ++ acc
       | otherwise = acc
 
-    collectQualified acc (_modName, varInfos) = varInfos ++ acc
+    collectQualified acc (_impInfo, varInfos) = varInfos ++ acc

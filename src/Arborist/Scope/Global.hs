@@ -42,15 +42,14 @@ declToExportedName modName decl =
     , decl = decl
     }
 
-exportToInfo :: ModuleText -> ModuleText -> Bool -> ExportedDecl -> GlblDeclInfo
-exportToInfo importedFrom moduleNamespace qualified expName =
+exportToInfo :: ImportInfo -> Bool -> ExportedDecl -> GlblDeclInfo
+exportToInfo importedFrom qualified expName =
   GlblDeclInfo
     { name = expName.name
     , decl = expName.decl
     , originatingMod = expName.mod
     , importedFrom = importedFrom
     , requiresQualifier = qualified
-    , moduleNamespace = moduleNamespace 
     }
 
 infoToExport :: GlblDeclInfo -> ExportedDecl
@@ -90,7 +89,13 @@ getImportNames' prgIndex exportIndex inProgress thisImport =
       mod = thisImport.mod
       alias = fromMaybe thisImport.mod thisImport.alias
       (exportedNames, updatedExportIndex) = getExportedNames' prgIndex exportIndex inProgress mod
-      glblNameInfo = exportToInfo mod alias qualified <$> exportedNames
+      importInfo =
+        ImportInfo
+          {
+            mod = mod 
+          , namespace = alias
+          }
+      glblNameInfo = exportToInfo importInfo qualified <$> exportedNames
       importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> thisImport.importList
       importList
         | null importNames = glblNameInfo
@@ -140,20 +145,28 @@ getExportedNames' prgIndex exportIndex inProgress modName
               aliasModMap = getAliasModMap prg
 
               reExportedAliases = (.mod) <$> exportItemMods exportLst
-              reExportedMods =
+              reExportedAliasesSet = Set.fromList reExportedAliases
+              reExportedModsSet =
                 modsFromAliases aliasModMap reExportedAliases
               requiredImports =
                 if null transitiveReexportNames
                   then
                     filter
-                      (isExportedImport reExportedMods)
+                      (isExportedImport reExportedModsSet)
                       prg.imports
                   else prg.imports
 
               (allImportedNames, updatedExportIdx) =
                 getManyImportNames' prgIndex exportIndex inProgress' requiredImports
+              
+              thisModImportInfo =
+                ImportInfo
+                  {
+                    mod = modName
+                  , namespace = modName
+                  }
 
-              declaredNamesInfo = exportToInfo modName modName False <$> declaredNames
+              declaredNamesInfo = exportToInfo thisModImportInfo False <$> declaredNames
               allAvailableNames =
                 declaredNamesInfo
                   <> allImportedNames
@@ -161,7 +174,7 @@ getExportedNames' prgIndex exportIndex inProgress modName
               moduleExports =
                 filter
                   ( \expInfo ->
-                      (expInfo.moduleNamespace `Set.member` reExportedMods)
+                      (expInfo.importedFrom.namespace `Set.member` reExportedAliasesSet)
                         && (not expInfo.requiresQualifier)
                   )
                   allAvailableNames
@@ -182,11 +195,13 @@ getDeclaredNames mod prg =
 
 getGlobalAvailableNames :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
 getGlobalAvailableNames availPrgs exportIdx thisPrg =
-  let declaredNames =
+  let 
+      declaredNames =
         maybe
           []
           ( \modName ->
-              exportToInfo modName modName False <$> getDeclaredNames modName thisPrg
+              let thisModImportInfo = (ImportInfo modName modName) in
+              exportToInfo thisModImportInfo False <$> getDeclaredNames modName thisPrg
           )
           thisPrg.mod
       (importedNames, _) = getManyImportNames availPrgs exportIdx thisPrg.imports
@@ -226,7 +241,7 @@ globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
     b1.name.node.nodeText == b2.name.node.nodeText
       && (AST.getDynNode b1.node).nodeText == (AST.getDynNode b2.node).nodeText
 
-  tryMergeSig :: Hir.SigDecl -> Bool -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeSig :: Hir.SigDecl -> Bool -> ImportInfo -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeSig s requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
@@ -243,7 +258,8 @@ globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
   tryMergeSig s requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
         && v.name == s.name
-        && requiresQualifier == v.requiresQualifier =
+        && requiresQualifier == v.requiresQualifier 
+          =
         case v.sig of
           Nothing ->
             let merged = v {sig = Just s, importedFrom = NES.insert importedFrom v.importedFrom, requiresQualifier}
@@ -260,7 +276,7 @@ globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
         let (result, rest) = tryMergeSig s requiresQualifier importedFrom origMod vs
          in (result, v : rest)
 
-  tryMergeBind :: Hir.BindDecl -> Bool -> ModuleText -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeBind :: Hir.BindDecl -> Bool -> ImportInfo -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeBind b requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
