@@ -1,6 +1,6 @@
 module Arborist.Scope.Global (
-  getExportedNames,
-  getImportNames,
+  getExportedDecls,
+  getImportDecls,
   globalNamesToScope,
   getGlobalAvailableNames,
   ExportIndex,
@@ -60,35 +60,35 @@ infoToExport glblInfo =
     , mod = glblInfo.originatingMod
     }
 
--- | Get all names exported by a given export.
+-- | Get all declarations exported by a given export.
 -- Requires dependent programs in `ProgramIndex` or else will not find given imports
-getExportedNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedDecl], ExportIndex)
-getExportedNames prgIdx exportIdx modName =
-  getExportedNames' prgIdx exportIdx Set.empty modName
+getExportedDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedDecl], ExportIndex)
+getExportedDecls prgIdx exportIdx modName =
+  getExportedDecls' prgIdx exportIdx Set.empty modName
 
-getManyImportNames :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblDeclInfo], ExportIndex)
-getManyImportNames prgIdx exportIdx imps =
-  getManyImportNames' prgIdx exportIdx Set.empty imps
+getManyImportDecls :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblDeclInfo], ExportIndex)
+getManyImportDecls prgIdx exportIdx imps =
+  getManyImportDecls' prgIdx exportIdx Set.empty imps
 
--- | Get all names from a given import
+-- | Get all declarations from a given import
 -- Requires dependent programs in `ProgramIndex` or else will not find given imports
-getImportNames :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblDeclInfo], ExportIndex)
-getImportNames prgIdx exportIdx imp =
-  getImportNames' prgIdx exportIdx Set.empty imp
+getImportDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblDeclInfo], ExportIndex)
+getImportDecls prgIdx exportIdx imp =
+  getImportDecls' prgIdx exportIdx Set.empty imp
 
 -- Internal cycle-safe versions
-getImportNames' ::
+getImportDecls' ::
   (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
   Hir.Import ->
   ([GlblDeclInfo], ExportIndex)
-getImportNames' prgIndex exportIndex inProgress thisImport =
+getImportDecls' prgIndex exportIndex inProgress thisImport =
   let qualified = thisImport.qualified
       mod = thisImport.mod
       alias = fromMaybe thisImport.mod thisImport.alias
-      (exportedNames, updatedExportIndex) = getExportedNames' prgIndex exportIndex inProgress mod
+      (exportedNames, updatedExportIndex) = getExportedDecls' prgIndex exportIndex inProgress mod
       importInfo =
         ImportInfo
           {
@@ -103,36 +103,36 @@ getImportNames' prgIndex exportIndex inProgress thisImport =
         | otherwise = filter (\n -> Set.member n.name importNames) glblNameInfo
    in (importList, updatedExportIndex)
 
-getManyImportNames' ::
+getManyImportDecls' ::
   (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
   [Hir.Import] ->
   ([GlblDeclInfo], ExportIndex)
-getManyImportNames' prgIndex exportIndex inProgress imports =
+getManyImportDecls' prgIndex exportIndex inProgress imports =
   List.foldl'
     ( \(importedNamesAgg, idx) imp ->
-        let (importedNames, nextIdx) = getImportNames' prgIndex idx inProgress imp
+        let (importedNames, nextIdx) = getImportDecls' prgIndex idx inProgress imp
          in (importedNames <> importedNamesAgg, nextIdx)
     )
     ([], exportIndex)
     imports
 
-getExportedNames' ::
+getExportedDecls' ::
   ProgramIndex ->
   ExportIndex ->
   Set.Set ModuleText ->
   ModuleText ->
   ([ExportedDecl], ExportIndex)
-getExportedNames' prgIndex exportIndex inProgress modName
+getExportedDecls' prgIndex exportIndex inProgress modName
   | modName `Set.member` inProgress = ([], exportIndex)
   | Just exports <- Map.lookup modName exportIndex = (exports, exportIndex)
-  | Just prg <- Map.lookup modName prgIndex = getExportedNamesFromPrg prg
+  | Just prg <- Map.lookup modName prgIndex = getExportedDeclsFromPrg prg
   | otherwise = ([], exportIndex)
  where
-  getExportedNamesFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedDecl], ExportIndex)
-  getExportedNamesFromPrg prg =
+  getExportedDeclsFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedDecl], ExportIndex)
+  getExportedDeclsFromPrg prg =
     let declaredNames = getDeclaredNames modName prg
         inProgress' = Set.insert modName inProgress
      in case prg.exports of
@@ -157,7 +157,7 @@ getExportedNames' prgIndex exportIndex inProgress modName
                   else prg.imports
 
               (allImportedNames, updatedExportIdx) =
-                getManyImportNames' prgIndex exportIndex inProgress' requiredImports
+                getManyImportDecls' prgIndex exportIndex inProgress' requiredImports
               
               thisModImportInfo =
                 ImportInfo
@@ -204,7 +204,7 @@ getGlobalAvailableNames availPrgs exportIdx thisPrg =
               exportToInfo thisModImportInfo False <$> getDeclaredNames modName thisPrg
           )
           thisPrg.mod
-      (importedNames, _) = getManyImportNames availPrgs exportIdx thisPrg.imports
+      (importedNames, _) = getManyImportDecls availPrgs exportIdx thisPrg.imports
    in declaredNames <> importedNames
 
 -- | From a list of annotated declarations, attempt to build a scope - will try to

@@ -435,7 +435,7 @@ main = do
     justTarget <- lazyGetPrgs targetFile
     let Just target = Map.lookup targetMod justTarget
     requiredPrograms <- time "gather" $ gatherScopeDeps Map.empty target modFileMap (Just 2)
-    let exportIdx2 = getExportedNames requiredPrograms Map.empty (parseModuleTextFromText "Mercury.Database.Monad.Sql")
+    let exportIdx2 = getExportedDecls requiredPrograms Map.empty (parseModuleTextFromText "Mercury.Database.Monad.Sql")
     -- let glblAvail = getGlobalAvailableNames requiredPrograms Map.empty (fromJust $ Map.lookup (parseModuleTextFromText "Handler.User") requiredPrograms)
     -- let renameTree = renamePrg allPrgs Map.empty target
     let renameTree = renamePrg requiredPrograms Map.empty target
