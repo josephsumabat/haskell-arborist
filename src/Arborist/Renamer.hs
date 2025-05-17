@@ -13,7 +13,7 @@ where
 import AST qualified
 import AST.Haskell qualified as AST
 import Arborist.Exports
-import Arborist.ModGraph
+import Arborist.ProgramIndex
 import Arborist.Scope
 import Arborist.Scope.Global
 import Arborist.Scope.Types

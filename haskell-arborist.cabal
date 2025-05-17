@@ -43,7 +43,6 @@ library
       Arborist.Files
       Arborist.Haddock
       Arborist.ModExports
-      Arborist.ModGraph
       Arborist.ProgramIndex
       Arborist.Renamer
       Arborist.Renamer.GlobalEnv

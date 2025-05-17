@@ -10,7 +10,7 @@ import Arborist.Debug
 import Arborist.Debug.Trace
 import Arborist.Files
 import Arborist.Haddock
-import Arborist.ModGraph
+import Arborist.ProgramIndex
 import Arborist.Renamer (RenamePhase, renamePrg)
 import Arborist.Renamer.GlobalEnv
 import Arborist.Scope

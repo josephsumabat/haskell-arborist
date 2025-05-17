@@ -4,13 +4,12 @@ module Arborist.Scope where
 
 import AST
 import AST.Haskell qualified as AST
-import Arborist.ModGraph
+import Arborist.ProgramIndex
 import Arborist.Scope.Global
 import Arborist.Scope.Local
 import Arborist.Scope.Types
 import Control.Error (headMay)
 import Data.Either.Extra
-import Data.List qualified as List
 import Data.Maybe
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
