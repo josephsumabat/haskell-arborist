@@ -8,20 +8,19 @@ import Hir.Types
 import Hir.Types qualified as Hir
 import Arborist.Exports
 import Arborist.Files
-import Control.Error
 import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Foldable
-import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.Set qualified as Set
 import Data.Text.Encoding qualified as T
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
-import Hir.Types
-import Hir.Types qualified as Hir
 import System.Directory qualified as Dir
+
+-- | In memory index of module -> program
+type ProgramIndex = Map.HashMap ModuleText Hir.Program
 
 -- | Find all dependencies required to resolve a given module and add them to a `ProgramIndex`
 -- Optionally accepts a maximum depth to search dependencies for
@@ -160,9 +159,6 @@ getPrgs prgs hsFiles =
             pure (parsedList', nextSeen, nextPrgIndex)
           else do
             pure (parsedList, seen, prgIndex)
-
--- | In memory index of module -> program
-type ProgramIndex = Map.HashMap ModuleText Hir.Program
 
 prgsToMap :: [Hir.Program] -> ProgramIndex
 prgsToMap prgs =
