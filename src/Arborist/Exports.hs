@@ -57,8 +57,8 @@ getNameExportInfo availNames exports =
 
   getSearchableExportSet :: [Hir.ExportItem] -> Set.Set (T.Text, Maybe ModuleText)
   getSearchableExportSet = Set.fromList . map toPair . exportItemNames
-    where
-      toPair qual = (qual.name.node.nodeText, (.mod) <$> qual.mod)
+   where
+    toPair qual = (qual.name.node.nodeText, (.mod) <$> qual.mod)
 
 -- | Get names that are not declared in the current program
 getTransitiveReExportNames :: Hir.Program -> [Hir.ExportItem] -> Set.Set T.Text

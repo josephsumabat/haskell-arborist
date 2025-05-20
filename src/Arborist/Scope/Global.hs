@@ -91,8 +91,7 @@ getImportDecls' prgIndex exportIndex inProgress thisImport =
       (exportedNames, updatedExportIndex) = getExportedDecls' prgIndex exportIndex inProgress mod
       importInfo =
         ImportInfo
-          {
-            mod = mod 
+          { mod = mod
           , namespace = alias
           }
       glblNameInfo = exportToInfo importInfo qualified <$> exportedNames
@@ -158,11 +157,10 @@ getExportedDecls' prgIndex exportIndex inProgress modName
 
               (allImportedNames, updatedExportIdx) =
                 getManyImportDecls' prgIndex exportIndex inProgress' requiredImports
-              
+
               thisModImportInfo =
                 ImportInfo
-                  {
-                    mod = modName
+                  { mod = modName
                   , namespace = modName
                   }
 
@@ -195,17 +193,18 @@ getDeclaredNames mod prg =
 
 getGlobalAvailableNames :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
 getGlobalAvailableNames availPrgs exportIdx thisPrg =
-  let 
-      declaredNames =
-        maybe
-          []
-          ( \modName ->
-              let thisModImportInfo = (ImportInfo modName modName) in
-              exportToInfo thisModImportInfo False <$> getDeclaredNames modName thisPrg
-          )
-          thisPrg.mod
-      (importedNames, _) = getManyImportDecls availPrgs exportIdx thisPrg.imports
-   in declaredNames <> importedNames
+  let
+    declaredNames =
+      maybe
+        []
+        ( \modName ->
+            let thisModImportInfo = (ImportInfo modName modName)
+             in exportToInfo thisModImportInfo False <$> getDeclaredNames modName thisPrg
+        )
+        thisPrg.mod
+    (importedNames, _) = getManyImportDecls availPrgs exportIdx thisPrg.imports
+   in
+    declaredNames <> importedNames
 
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
@@ -258,8 +257,7 @@ globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
   tryMergeSig s requiresQualifier importedFrom origMod (v : vs)
     | v.originatingMod == origMod
         && v.name == s.name
-        && requiresQualifier == v.requiresQualifier 
-          =
+        && requiresQualifier == v.requiresQualifier =
         case v.sig of
           Nothing ->
             let merged = v {sig = Just s, importedFrom = NES.insert importedFrom v.importedFrom, requiresQualifier}

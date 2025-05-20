@@ -12,6 +12,7 @@ where
 
 import AST qualified
 import AST.Haskell qualified as AST
+import Arborist.Debug.Trace
 import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope
@@ -29,7 +30,6 @@ import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
-import Arborist.Debug.Trace
 
 data RenamePhase
 
@@ -212,8 +212,8 @@ renamePrg availPrgs exportIdx prg =
              in tryMergeGlblVarInfo
                   $ filter
                     ( \varInfo ->
-                        let aliasSet = NESet.map (.namespace) varInfo.importedFrom in
-                        maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
+                        let aliasSet = NESet.map (.namespace) varInfo.importedFrom
+                         in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
                     )
                   $ List.foldl' collectQualified [] (Map.toList impVarMap)
    where

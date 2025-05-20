@@ -5,6 +5,7 @@ import AST.Haskell qualified as AST
 import Arborist.Haddock
 import Control.Applicative
 import Data.HashMap.Lazy qualified as Map
+import Data.Hashable
 import Data.LineColRange
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
@@ -12,7 +13,6 @@ import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import Data.Hashable
 
 -- | An intermediate representation of a declaration annotated
 data GlblDeclInfo = GlblDeclInfo
@@ -27,13 +27,11 @@ data GlblDeclInfo = GlblDeclInfo
 -- | A module namespace can be an alias or a real module
 type ModNamespace = ModuleText
 
-data ImportInfo =
-  ImportInfo
-    {
-      mod :: ModuleText
-    , namespace :: ModNamespace
-    }
-  deriving (Show,Eq, Ord)
+data ImportInfo = ImportInfo
+  { mod :: ModuleText
+  , namespace :: ModNamespace
+  }
+  deriving (Show, Eq, Ord)
 
 instance Hashable ImportInfo where
   hashWithSalt s n = hashWithSalt s (n.mod.text, n.namespace.text)
@@ -76,8 +74,8 @@ tryMergeGlblVarInfo =
       , loc = min g1.loc g2.loc
       , requiresQualifier =
           if g1.requiresQualifier == g2.requiresQualifier
-             then g1.requiresQualifier
-             else False
+            then g1.requiresQualifier
+            else False
       }
 
 data LocalVarInfo

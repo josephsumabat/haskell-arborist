@@ -1,28 +1,27 @@
 {-# LANGUAGE TupleSections #-}
 
-module Arborist.ProgramIndex
-  (
-  gatherScopeDeps
-  , getPrgs
-  , ProgramIndex
-  , prgsToMap
-  ) where
+module Arborist.ProgramIndex (
+  gatherScopeDeps,
+  getPrgs,
+  ProgramIndex,
+  prgsToMap,
+) where
 
-import Control.Error
-import Data.HashMap.Lazy qualified as Map
-import Hir.Types
-import Hir.Types qualified as Hir
 import Arborist.Exports
 import Arborist.Files
+import Control.Error
 import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Foldable
+import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.Set qualified as Set
 import Data.Text.Encoding qualified as T
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
+import Hir.Types
+import Hir.Types qualified as Hir
 import System.Directory qualified as Dir
 
 -- | In memory index of module -> program
