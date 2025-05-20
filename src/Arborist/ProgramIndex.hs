@@ -1,6 +1,12 @@
 {-# LANGUAGE TupleSections #-}
 
-module Arborist.ProgramIndex (gatherScopeDeps, ProgramIndex, prgsToMap) where
+module Arborist.ProgramIndex
+  (
+  gatherScopeDeps
+  , getPrgs
+  , ProgramIndex
+  , prgsToMap
+  ) where
 
 import Control.Error
 import Data.HashMap.Lazy qualified as Map

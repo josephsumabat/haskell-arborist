@@ -180,6 +180,9 @@ test-suite haskell-arborist-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Arborist.FilesSpec
+      Arborist.ProgramIndexSpec
+      TestImport
       Paths_haskell_arborist
   hs-source-dirs:
       test
@@ -219,6 +222,7 @@ test-suite haskell-arborist-test
     , haskell-arborist
     , haskell-ast
     , hspec ==2.*
+    , hspec-golden
     , lens
     , nonempty-containers
     , optics

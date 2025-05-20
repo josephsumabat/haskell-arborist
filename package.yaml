@@ -83,6 +83,7 @@ tests:
   haskell-arborist-test:
     dependencies:
     - haskell-arborist
+    - hspec-golden
     defaults: hspec/hspec@main
     ghc-options:
       - -fwrite-ide-info
