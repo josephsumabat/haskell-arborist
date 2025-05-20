@@ -57,7 +57,6 @@ library
       Hir.Parse
       Hir.Print
       Hir.Types
-      ModContext
       ModUtils
   other-modules:
       Paths_haskell_arborist
