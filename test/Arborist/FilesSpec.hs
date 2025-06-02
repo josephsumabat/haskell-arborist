@@ -1,5 +1,6 @@
 module Arborist.FilesSpec (spec) where
 
+import Data.List
 import Arborist.Files
 import Data.HashMap.Strict qualified as Map
 import Data.Text qualified as T
@@ -20,5 +21,5 @@ spec = do
                   ( \(ModuleText {text}, path) ->
                       T.concat [text, " -> ", T.pack path]
                   )
-                  (Map.toList mods)
+                  (sortOn fst $ Map.toList mods)
         pure $ defaultGolden "buildModuleFileMap" (T.unpack renderedModMap)
