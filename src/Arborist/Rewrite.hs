@@ -1,17 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Arborist.Rewrite (rewriteNode) where
+module Arborist.Rewrite (rewriteNode, replaceRange) where
 
 import Data.LineCol
 import Data.LineColRange
 import Data.Pos
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Range (Range(..))
 import Data.Edit
 import AST (DynNode)
 import AST qualified
-
 
 
 replaceRange :: LineColRange -> Text -> Text -> Text

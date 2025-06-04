@@ -22,7 +22,6 @@ data ExportRewrite = ExportRewrite
 getAllDeclNames :: Hir.Program -> [ExportRewrite]
 getAllDeclNames prog = mapMaybe declToExportRewrite prog.decls
 
-
 -- change to parseP and get 
 declToExportRewrite :: Hir.Decl -> Maybe ExportRewrite
 declToExportRewrite decl = 
@@ -56,7 +55,7 @@ getNewExportList :: [ExportRewrite] -> H.ExportsP -> Text
 getNewExportList rewrites exportNode =
   let exportNodeDyn = (AST.getDynNode exportNode)
       names = map (\(ExportRewrite _ nm) -> nm) rewrites
-      namesText = Text.intercalate "," names
+      namesText = Text.intercalate ", " names
       originalExportList = exportNodeDyn.nodeText
       prefix
           | originalExportList == "()" = "("
@@ -69,9 +68,9 @@ createNewExportList :: [ExportRewrite] -> Text
 createNewExportList rewrites =
   let
     names = map (\(ExportRewrite _ nm) -> nm) rewrites
-    namesText = Text.intercalate ", " names
+    namesText = Text.intercalate "\n  , " names
   in
-    "(" <> namesText <> ")"
+    "\n  ( " <> namesText <> "\n  )\n"
 
 -- wrapper specific to exporting for rewriteNode
 editExportList :: H.ExportsP -> [ExportRewrite] -> Edit
@@ -85,7 +84,7 @@ writeNewExportList headerNode newExportRewriteList =
   let header = AST.getDynNode headerNode
       newExports = createNewExportList newExportRewriteList
       moduleNameTxt = (AST.getDynNode headerNode.module').nodeText
-      newText = "module " <> moduleNameTxt <> " " <> newExports <> " where"
+      newText = "module " <> moduleNameTxt <> newExports <> "where"
   in rewriteNode header newText
 
 -- given the program, finds the export node and the new list of exports to create an Edit

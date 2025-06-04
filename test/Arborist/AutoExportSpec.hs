@@ -29,7 +29,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "(foo, bar, (***))"
+                      [Change insertedText _] -> insertedText `shouldBe` "\n  ( foo\n  , bar\n  , (***)\n  )\n"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -44,7 +44,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "(foo, bar)"
+                      [Change insertedText _] -> insertedText `shouldBe` "\n  ( foo\n  , bar\n  )\n"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -59,7 +59,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _]-> insertedText `shouldBe` "(foo, bar)"
+                      [Change insertedText _]-> insertedText `shouldBe` "\n  ( foo\n  , bar\n  )\n"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -74,7 +74,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( foo\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -89,7 +89,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo, bar) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( foo\n  , bar\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -104,7 +104,7 @@ spec = do
                     let changes = getChanges (getAllDeclExportEdit prog progH)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe`  "module StaticLS.IDE.SourceEdit (MyClass(..), MyNewtype(..), MyData(..), foo, (***)) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( MyClass(..)\n  , MyNewtype(..)\n  , MyData(..)\n  , foo\n  , (***)\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -152,7 +152,7 @@ spec = do
                     let changes = getChanges (getDeclExportEdit progH newDecl)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( foo\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -168,7 +168,7 @@ spec = do
                     let changes = getChanges (getDeclExportEdit progH newDecl)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyClass(..)) where"
+                      [Change insertedText _] -> insertedText `shouldBe`"module StaticLS.IDE.SourceEdit\n  ( MyClass(..)\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -184,7 +184,7 @@ spec = do
                     let changes = getChanges (getDeclExportEdit progH newDecl)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyNewtype(..)) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( MyNewtype(..)\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -200,6 +200,6 @@ spec = do
                     let changes = getChanges (getDeclExportEdit progH newDecl)
                     in
                     case changes of
-                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyData(..)) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit\n  ( MyData(..)\n  )\nwhere"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
