@@ -5,7 +5,7 @@
 module Arborist.AutoExportSpec (spec) where
 
 import Test.Hspec
-import Hir.Parse       
+import Hir.Parse
 import Arborist.AutoExport (getAllDeclExportEdit, getDeclExportEdit)
 import Data.Edit (getChanges)
 import Data.Change (Change(..))
@@ -16,7 +16,7 @@ import Hir.Types
 
 spec :: Spec
 spec = do
-  xdescribe "getAllDeclExportEdit" $ do
+  describe "getAllDeclExportEdit" $ do
 
     it "getAllDeclExportEdit: inserts all exports to empty export list" $ do
       programs <- getPrg ["./test-data/auto-export/EmptyExample.hs"]
@@ -24,12 +24,12 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getAllDeclExportEdit prog progH) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "(foo, bar, (***))"
+                      [Change insertedText _] -> insertedText `shouldBe` "(foo, bar, (***))"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -39,12 +39,12 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getAllDeclExportEdit prog progH) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "(foo, bar)"
+                      [Change insertedText _] -> insertedText `shouldBe` "(foo, bar)"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -54,27 +54,27 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getAllDeclExportEdit prog progH) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
                     case changes of
-                      [Change insertedText _, _]-> insertedText `shouldBe` "(foo, bar)"
+                      [Change insertedText _]-> insertedText `shouldBe` "(foo, bar)"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
-  
+
     it "getAllDeclExportEdit: inserts all exports to an empty header when only one decl exists" $ do
       programs <- getPrg ["./test-data/auto-export/EmptyHeaderOneDeclExample.hs"]
       let [prog] = programs
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getAllDeclExportEdit prog progH) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -84,12 +84,27 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getAllDeclExportEdit prog progH) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo, bar) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo, bar) where"
+                      _ ->  expectationFailure $ show changes
+        _ -> expectationFailure "not a program"
+
+    it "getAllDeclExportEdit: inserts all exports w/ multiple decl types to an empty header" $ do
+      programs <- getPrg ["./test-data/auto-export/EmptyHeaderMultipleDeclTypesExamples.hs"]
+      let [prog] = programs
+          haskelProgram = prog.node
+          progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
+
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getAllDeclExportEdit prog progH)
+                    in
+                    case changes of
+                      [Change insertedText _] -> insertedText `shouldBe`  "module StaticLS.IDE.SourceEdit (MyClass(..), MyNewtype(..), MyData(..), foo, (***)) where"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -100,12 +115,12 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getDeclExportEdit progH newDecl) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "(foo)"
+                      [Change insertedText _] -> insertedText `shouldBe` "(foo)"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
@@ -116,29 +131,75 @@ spec = do
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getDeclExportEdit progH newDecl) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
                     case changes of
-                      [Change insertedText _, _]-> insertedText `shouldBe` "(foo, bar)"
+                      [Change insertedText _]-> insertedText `shouldBe` "(foo, bar)"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
-    it "getDeclExportEdit: appends a single export to an empty header" $ do
+    it "getDeclExportEdit: appends a single export (bind) to an empty header" $ do
       programs <- getPrg ["./test-data/auto-export/EmptyHeaderExample.hs"]
       let [prog] = programs
           newDecl = (getDecls prog) !! 1
           haskelProgram = prog.node
           progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
 
-      case progHeader of 
-        Just progH -> 
-                    let changes = getChanges (getDeclExportEdit progH newDecl) 
-                    in 
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
                     case changes of
-                      [Change insertedText _, _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (foo) where"
                       _ ->  expectationFailure $ show changes
         _ -> expectationFailure "not a program"
 
-    
+    it "getDeclExportEdit: appends a single export (class) to an empty header" $ do
+      programs <- getPrg ["./test-data/auto-export/EmptyHeaderMultipleDeclTypesExamples.hs"]
+      let [prog] = programs
+          newDecl = head (getDecls prog)
+          haskelProgram = prog.node
+          progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
+
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
+                    case changes of
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyClass(..)) where"
+                      _ ->  expectationFailure $ show changes
+        _ -> expectationFailure "not a program"
+
+    it "getDeclExportEdit: appends a single export (newType) to an empty header" $ do
+      programs <- getPrg ["./test-data/auto-export/EmptyHeaderMultipleDeclTypesExamples.hs"]
+      let [prog] = programs
+          newDecl = (getDecls prog) !! 1
+          haskelProgram = prog.node
+          progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
+
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
+                    case changes of
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyNewtype(..)) where"
+                      _ ->  expectationFailure $ show changes
+        _ -> expectationFailure "not a program"
+
+    it "getDeclExportEdit: appends a single export (data) to an empty header" $ do
+      programs <- getPrg ["./test-data/auto-export/EmptyHeaderMultipleDeclTypesExamples.hs"]
+      let [prog] = programs
+          newDecl = (getDecls prog) !! 2
+          haskelProgram = prog.node
+          progHeader = findNode (AST.cast @H.HeaderP) (AST.getDynNode haskelProgram)
+
+      case progHeader of
+        Just progH ->
+                    let changes = getChanges (getDeclExportEdit progH newDecl)
+                    in
+                    case changes of
+                      [Change insertedText _] -> insertedText `shouldBe` "module StaticLS.IDE.SourceEdit (MyData(..)) where"
+                      _ ->  expectationFailure $ show changes
+        _ -> expectationFailure "not a program"

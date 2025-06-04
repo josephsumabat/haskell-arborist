@@ -4,21 +4,18 @@ module Arborist.AutoExport
   ) where
 
 import Hir.Types qualified as Hir
-import Hir (declNameText)
 import AST.Haskell qualified as H
 import AST qualified
 import Data.Text (Text)
 import Data.Maybe (mapMaybe, maybeToList)
 import qualified Data.Text as Text
-import Data.Range (Range(..))
 import Data.Edit as Edit ( Edit, empty )
 import Data.Either.Extra (eitherToMaybe)
-import Data.Pos ( Pos(pos) )
 import Arborist.Rewrite (rewriteNode)
 
 data ExportRewrite = ExportRewrite
-  { name :: Text
-    --- extra text :: Text
+  { name :: Text,
+    renderedName :: Text 
   } deriving (Show, Eq)
     
 -- convert all export decls to [ExportRewrite]  
@@ -36,41 +33,42 @@ declToExportRewrite decl =
           wrapped
             | name.isOperator = "(" <> nameText <> ")"
             | otherwise = nameText
-      in  Just (ExportRewrite wrapped)
+      in  Just (ExportRewrite nameText wrapped)
+    Hir.DeclData decl  -> 
+      let name = decl.name
+          nameText = name.node.nodeText
+          renderedName = nameText <> "(..)"
+      in Just (ExportRewrite nameText renderedName)
+    Hir.DeclNewtype decl  -> 
+      let name = decl.name
+          nameText = name.node.nodeText
+          renderedName = nameText <> "(..)"
+      in Just (ExportRewrite nameText renderedName)
+    Hir.DeclClass decl  -> 
+      let name = decl.name
+          nameText = name.node.nodeText
+          renderedName = nameText <> "(..)"
+      in Just (ExportRewrite nameText renderedName)
     _ -> Nothing
-
-
--- data Decl
---   = DeclData DataDecl
---   | DeclNewtype NewtypeDecl
---   | DeclClass ClassDecl
---   | DeclSig SigDecl
---   | DeclBind BindDecl
---   | DeclDataFamily DataFamilyDecl
---   | DeclPatternSig PatternSigDecl
---   | DeclPattern PatternDecl
---   | DeclTypeFamily TypeFamilyDecl
---   | DeclTypeSynonym TypeSynonymDecl
---   deriving (Show, Eq)
 
 -- update the export list, use if want to maintain old exports
 getNewExportList :: [ExportRewrite] -> H.ExportsP -> Text
 getNewExportList rewrites exportNode =
   let exportNodeDyn = (AST.getDynNode exportNode)
-      names = map (\(ExportRewrite nm) -> nm) rewrites
-      namesText = Text.intercalate ", " names
+      names = map (\(ExportRewrite _ nm) -> nm) rewrites
+      namesText = Text.intercalate "," names
       originalExportList = exportNodeDyn.nodeText
       prefix
           | originalExportList == "()" = "("
           | otherwise = Text.init originalExportList <> ", "
   in
-    prefix <> namesText <> ")tessssst"
+    prefix <> namesText <> ")"
 
 -- create a completely new export list
 createNewExportList :: [ExportRewrite] -> Text
 createNewExportList rewrites =
   let
-    names = map (\(ExportRewrite nm) -> nm) rewrites
+    names = map (\(ExportRewrite _ nm) -> nm) rewrites
     namesText = Text.intercalate ", " names
   in
     "(" <> namesText <> ")"
@@ -83,13 +81,12 @@ rewriteExportList :: H.ExportsP -> [ExportRewrite] -> Edit
 rewriteExportList exportNode newExportRewriteList = rewriteNode (AST.getDynNode exportNode) (createNewExportList newExportRewriteList)
 
 writeNewExportList :: H.HeaderUP -> [ExportRewrite]  -> Edit
-writeNewExportList headerNode newExportRewriteList = 
-    let moduleDyn = AST.getDynNode headerNode.module'
-        headerDyn = AST.getDynNode headerNode
-        Range _ modListPoint = moduleDyn.nodeRange
-        (prefix, suffix) = Text.splitAt modListPoint.pos headerDyn.nodeText
-        newText = prefix <> " " <> (createNewExportList newExportRewriteList) <> suffix
-    in rewriteNode (AST.getDynNode headerNode) newText
+writeNewExportList headerNode newExportRewriteList =
+  let header = AST.getDynNode headerNode
+      newExports = createNewExportList newExportRewriteList
+      moduleNameTxt = (AST.getDynNode headerNode.module').nodeText
+      newText = "module " <> moduleNameTxt <> " " <> newExports <> " where"
+  in rewriteNode header newText
 
 -- given the program, finds the export node and the new list of exports to create an Edit
 getAllDeclExportEdit :: Hir.Program -> H.HeaderP -> Edit

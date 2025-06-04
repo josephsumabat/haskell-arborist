@@ -38,7 +38,6 @@ replaceRange (LineColRange (LineCol startLine startCol) (LineCol endLine endCol)
 
 rewriteNode :: DynNode -> Text -> Edit
 rewriteNode dynNode newText =
-  let r = dynNode.nodeRange
-      Range start _ = r
-  in  delete r <> insert start newText
+  let range = dynNode.nodeRange
+  in  replace range newText
 
