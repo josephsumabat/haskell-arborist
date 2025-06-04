@@ -1,12 +1,10 @@
-module TestImport
-  (
-    lazyGetPrgs
-  , getPrg
-  , testDataDir
-  , allTestLibs
-  , getDecls
-  ) where
-
+module TestImport (
+  lazyGetPrgs,
+  getPrg,
+  testDataDir,
+  allTestLibs,
+  getDecls,
+) where
 
 import Arborist.ProgramIndex
 import Control.Error (mapMaybe)
@@ -28,7 +26,7 @@ allTestLibs =
   , testDataDir
   ]
 
-lazyGetPrgs :: [FilePath] -> IO ProgramIndex 
+lazyGetPrgs :: [FilePath] -> IO ProgramIndex
 lazyGetPrgs hsFiles = do
   -- traceShowM hsFiles
   entries <- forM hsFiles $ \file -> do
