@@ -8,7 +8,7 @@ import Data.Pos
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Range (Range(..))
-import Data.Edit as Edit
+import Data.Edit
 import AST (DynNode)
 import AST qualified
 
@@ -38,5 +38,7 @@ replaceRange (LineColRange (LineCol startLine startCol) (LineCol endLine endCol)
 
 rewriteNode :: DynNode -> Text -> Edit
 rewriteNode dynNode newText =
-  let Range start _ = dynNode.nodeRange
-  in  Edit.insert start newText
+  let r = dynNode.nodeRange
+      Range start _ = r
+  in  delete r <> insert start newText
+

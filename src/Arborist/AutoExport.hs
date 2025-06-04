@@ -30,8 +30,13 @@ getAllDeclNames prog = mapMaybe declToExportRewrite prog.decls
 declToExportRewrite :: Hir.Decl -> Maybe ExportRewrite
 declToExportRewrite decl = 
   case decl of
-    Hir.DeclBind _ -> Just (ExportRewrite (declNameText decl))
-      -- let decl-- check if it is an operator, if it is, wrap the "name" in parenthesis, use declName
+    Hir.DeclBind bind -> 
+      let name = bind.name
+          nameText = name.node.nodeText
+          wrapped
+            | name.isOperator = "(" <> nameText <> ")"
+            | otherwise = nameText
+      in  Just (ExportRewrite wrapped)
     _ -> Nothing
 
 
@@ -59,7 +64,7 @@ getNewExportList rewrites exportNode =
           | originalExportList == "()" = "("
           | otherwise = Text.init originalExportList <> ", "
   in
-    prefix <> namesText <> ")"
+    prefix <> namesText <> ")tessssst"
 
 -- create a completely new export list
 createNewExportList :: [ExportRewrite] -> Text
