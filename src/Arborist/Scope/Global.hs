@@ -1,8 +1,8 @@
 module Arborist.Scope.Global (
   getExportedDecls,
   getImportDecls,
-  globalNamesToScope,
-  getGlobalAvailableNames,
+  globalDeclsToScope,
+  getGlobalAvalibleDecls,
   ExportIndex,
   declToExportedName,
   exportToInfo,
@@ -191,8 +191,8 @@ getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedDecl]
 getDeclaredNames mod prg =
   fmap (declToExportedName mod) prg.decls
 
-getGlobalAvailableNames :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
-getGlobalAvailableNames availPrgs exportIdx thisPrg =
+getGlobalAvalibleDecls :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
+getGlobalAvalibleDecls availPrgs exportIdx thisPrg =
   let
     declaredNames =
       maybe
@@ -206,29 +206,68 @@ getGlobalAvailableNames availPrgs exportIdx thisPrg =
    in
     declaredNames <> importedNames
 
+declToNameInfo ::  GlblDeclInfo -> Maybe GlblNameInfo
+declToNameInfo d =
+  case d.decl of
+    Hir.DeclData    dd -> Just (mk DataDecl   (dd.name) (dd.node))
+    Hir.DeclNewtype nt -> Just (mk NewtypeDecl (nt.name) (nt.node))
+    Hir.DeclClass   cl -> Just (mk ClassDecl  (cl.name) (cl.node))
+    _                  -> Nothing
+ where
+  mk kind actualName astNode =
+    let nodeInfo = getDynNode astNode
+    in GlblNameInfo
+         { name              = actualName
+         , importedFrom      = NES.singleton d.importedFrom
+         , originatingMod    = d.originatingMod
+         , loc               = nodeInfo.nodeLineColRange
+         , requiresQualifier = d.requiresQualifier
+         , decl              = d.decl
+         , nameKind          = kind
+         }
+-- DUC 3409, get the name put it in, if there is an error where two things with the same name, return both and return ambigous name while resolving\
+  -- add every avalible name to list
+  -- Map of Text to a List of a global name info
+
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
-globalNamesToScope :: [GlblDeclInfo] -> Scope
-globalNamesToScope availNames = List.foldl' indexNameInfo emptyScope availNames
+globalDeclsToScope :: [GlblDeclInfo] -> Scope
+globalDeclsToScope  availDecl = List.foldl' indexDeclInfo emptyScope availDecl
  where
-  indexNameInfo :: Scope -> GlblDeclInfo -> Scope
-  indexNameInfo scope availName =
-    let nameKey = availName.name
-        originatingMod = availName.originatingMod
-        importedMod = availName.importedFrom
+  indexDeclInfo :: Scope -> GlblDeclInfo -> Scope
+  indexDeclInfo scope availDecl =
+    let declKey = availDecl.name
+        originatingMod = availDecl.originatingMod
+        importedMod = availDecl.importedFrom
         moduleKey = importedMod
         currentMap = scope.glblVarInfo
-        modMap = Map.findWithDefault Map.empty nameKey currentMap
+        modMap = Map.findWithDefault Map.empty declKey currentMap
         existing = Map.findWithDefault [] moduleKey modMap
 
-        (newEntry, rest) = case availName.decl of
-          Hir.DeclBind b -> tryMergeBind b availName.requiresQualifier importedMod originatingMod existing
-          Hir.DeclSig s -> tryMergeSig s availName.requiresQualifier importedMod originatingMod existing
+        (newEntry, rest) = case availDecl.decl of
+          Hir.DeclBind b -> tryMergeBind b availDecl.requiresQualifier importedMod originatingMod existing
+          Hir.DeclSig s -> tryMergeSig s availDecl.requiresQualifier importedMod originatingMod existing
           _ -> (Nothing, existing)
 
         updatedModMap = Map.insert importedMod (maybeToList newEntry ++ rest) modMap
-        updatedVarMap = Map.insert nameKey updatedModMap currentMap
-     in scope {glblVarInfo = updatedVarMap}
+        updatedVarMap = Map.insert declKey updatedModMap currentMap
+
+        -- decl to maybe Name
+        mNameInfo = declToNameInfo availDecl
+        nameMap = scope.glblNameInfo
+
+        updatedNameMap = case mNameInfo of
+          Nothing -> nameMap
+          Just nameInfo ->
+            let key   = nameInfo.name.node.nodeText
+                impInfo     = importedMod
+                nameMap    = scope.glblNameInfo
+                importMap  = Map.findWithDefault Map.empty key nameMap
+                existing    = Map.findWithDefault [] impInfo importMap
+                newImportMap  = Map.insert impInfo (existing ++ [nameInfo]) importMap
+            in Map.insert key newImportMap nameMap
+
+     in scope {glblVarInfo = updatedVarMap, glblNameInfo = updatedNameMap}
 
   equalSig :: Hir.SigDecl -> Hir.SigDecl -> Bool
   equalSig s1 s2 =
