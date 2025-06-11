@@ -7,7 +7,8 @@ module Arborist.Renamer (
   resolvedNameLocs,
   ResolvedVariable (..),
   ResolvedName (..),
-  RenamePhase
+  RenamePhase,
+  Resolveable
 )
 where
 
