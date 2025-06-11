@@ -29,6 +29,7 @@ import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
+import AST.Extension
 
 data RenamePhase
 
@@ -45,7 +46,7 @@ data ResolvedName
       { nameInfo :: GlblNameInfo
       , nameKind :: NameKind
       }
-  | AmbiguousName (NE.NonEmpty (ResolvedName))
+  | AmbiguousName (NE.NonEmpty (GlblNameInfo))
   | NoNameFound
   deriving (Show, Eq)
 
@@ -53,7 +54,7 @@ resolvedNameLocs :: ResolvedName -> [(Hir.ModuleText, LineColRange)]
 resolvedNameLocs resolvedName =
   case resolvedName of
     ResolvedName nameInfo _ -> [(nameInfo.originatingMod, nameInfo.loc)]
-    AmbiguousName names ->  NE.toList $ fmap (\(ResolvedName info _) -> (info.originatingMod, info.loc)) names
+    AmbiguousName names ->  NE.toList $ (\name -> (name.originatingMod, name.loc)) <$> names
     NoNameFound -> []
 
 resolvedLocs :: Hir.ModuleText -> ResolvedVariable -> [(Hir.ModuleText, LineColRange)]
@@ -88,7 +89,7 @@ instance AST.NodeX RenamePhase where
 
 type HaskellR = AST.Haskell RenamePhase
 
-type Resolveable = AST.NameP AST.:+ AST.VariableP AST.:+ AST.Nil
+type Resolveable ext = AST.Name ext AST.:+ AST.Variable ext AST.:+ AST.Nil
 
 -- | Renamer state within a single module
 data RenamerEnv = RenamerEnv
@@ -146,7 +147,7 @@ renamePrg availPrgs exportIdx prg =
 
   resolveNode :: RenamerEnv -> AST.DynNode -> AST.DynNode
   resolveNode renamerEnv n =
-    case AST.cast @Resolveable n of
+    case AST.cast @(Resolveable ParsePhase) n of
       Just (AST.Inj @(AST.NameP) nameNode) ->
         let resolvedName = resolveName renamerEnv nameNode
          in AST.getDynNode $ AST.modifyNameExt @RenamePhase nameNode (\_ -> resolvedName)
@@ -171,11 +172,10 @@ renamePrg availPrgs exportIdx prg =
   getGlobalResolvedNames :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> ResolvedName
   getGlobalResolvedNames renEnv currScope name qualifier =
     let infos = getValidGlobalNameInfos renEnv currScope name qualifier
-        wrapped = fmap (\info -> ResolvedName info (info.nameKind)) infos
-     in case wrapped of
+     in case infos of
           [] -> NoNameFound
-          [r] -> r
-          (r : rs) -> AmbiguousName (r NE.:| rs)
+          [x] -> (\info -> ResolvedName info (info.nameKind)) x
+          (x : xs) -> AmbiguousName (x NE.:| xs)
 
   -- find list of possible mappings
   getValidGlobalNameInfos :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> [GlblNameInfo]
