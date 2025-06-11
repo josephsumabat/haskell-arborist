@@ -4,16 +4,15 @@
 module Arborist.Renamer (
   renamePrg,
   resolvedLocs,
+  resolvedNameLocs,
   ResolvedVariable (..),
   ResolvedName (..),
-  RenamePhase,
+  RenamePhase
 )
 where
 
 import AST qualified
 import AST.Haskell qualified as AST
-import Arborist.Debug.Trace
-import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope
 import Arborist.Scope.Global
@@ -41,6 +40,22 @@ data ResolvedVariable
   | NoVarFound
   deriving (Show)
 
+data ResolvedName
+  = ResolvedName
+      { nameInfo :: GlblNameInfo
+      , nameKind :: NameKind
+      }
+  | AmbiguousName (NE.NonEmpty (ResolvedName))
+  | NoNameFound
+  deriving (Show, Eq)
+
+resolvedNameLocs :: ResolvedName -> [(Hir.ModuleText, LineColRange)]
+resolvedNameLocs resolvedName =
+  case resolvedName of
+    ResolvedName nameInfo _ -> [(nameInfo.originatingMod, nameInfo.loc)]
+    AmbiguousName names ->  NE.toList $ fmap (\(ResolvedName info _) -> (info.originatingMod, info.loc)) names
+    NoNameFound -> []
+
 resolvedLocs :: Hir.ModuleText -> ResolvedVariable -> [(Hir.ModuleText, LineColRange)]
 resolvedLocs thisMod resolvedVar =
   case resolvedVar of
@@ -55,10 +70,6 @@ resolvedLocs thisMod resolvedVar =
     AmbiguousLocalVar lclVars -> (thisMod,) <$> (NE.toList $ lclVarInfoToLoc lclVars)
     ResolvedField -> []
     NoVarFound -> []
-
-data ResolvedName
-  = NoNameFound
-  deriving (Show)
 
 fstResolved :: [ResolvedVariable] -> ResolvedVariable
 fstResolved resolvedNames =
@@ -85,7 +96,6 @@ data RenamerEnv = RenamerEnv
   , unqualifiedImports :: Set.Set ModNamespace
   , scope :: [Scope]
   }
-  deriving (Show)
 
 renamePrg ::
   ProgramIndex ->
@@ -138,17 +148,58 @@ renamePrg availPrgs exportIdx prg =
   resolveNode renamerEnv n =
     case AST.cast @Resolveable n of
       Just (AST.Inj @(AST.NameP) nameNode) ->
-        AST.getDynNode $ AST.modifyNameExt @RenamePhase nameNode (\_ -> NoNameFound)
+        let resolvedName = resolveName renamerEnv nameNode
+         in AST.getDynNode $ AST.modifyNameExt @RenamePhase nameNode (\_ -> resolvedName)
       Just (AST.Inj @(AST.VariableP) node) ->
-        let resolvedName = resolveVarName renamerEnv node
-            result = AST.getDynNode $ AST.modifyVariableExt @RenamePhase node (\_ -> resolvedName)
+        let resolvedVar = resolveVar renamerEnv node
+            result = AST.getDynNode $ AST.modifyVariableExt @RenamePhase node (\_ -> resolvedVar)
          in result
       Just _ -> n
       Nothing -> n
 
+  -- get type name + qualifier
+  resolveName :: RenamerEnv -> AST.NameP -> ResolvedName
+  resolveName renamerEnv nameP =
+    case renamerEnv.scope of
+      [] -> NoNameFound
+      (currScope : _) ->
+        case nameP.dynNode.nodeParent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap) of
+          Just qualU -> getGlobalResolvedNames renamerEnv currScope nameP.dynNode.nodeText (Just qualU.module')
+          Nothing -> getGlobalResolvedNames renamerEnv currScope nameP.dynNode.nodeText Nothing
+
+  -- set as no name, corrrect mapping, or ambigous
+  getGlobalResolvedNames :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> ResolvedName
+  getGlobalResolvedNames renEnv currScope name qualifier =
+    let infos = getValidGlobalNameInfos renEnv currScope name qualifier
+        wrapped = fmap (\info -> ResolvedName info (info.nameKind)) infos
+     in case wrapped of
+          [] -> NoNameFound
+          [r] -> r
+          (r : rs) -> AmbiguousName (r NE.:| rs)
+
+  -- find list of possible mappings
+  getValidGlobalNameInfos :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> [GlblNameInfo]
+  getValidGlobalNameInfos renamerEnv currScope name qualifier = 
+    case Map.lookup name (currScope.glblNameInfo) of
+      Nothing -> []
+      Just impNameMap ->
+        case qualifier of
+          Nothing -> filter (\nameInfo -> not nameInfo.requiresQualifier) $ List.foldl' collectUnqualified [] (Map.toList impNameMap)
+          Just q ->
+            let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
+             in  filter (\nameInfo -> let aliasSet = NESet.map (.namespace) nameInfo.importedFrom
+                                        in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
+                        )
+                  $ List.foldl' collectQualified [] (Map.toList impNameMap)
+        where 
+          collectQualified acc (_impInfo, nameInfos) = nameInfos ++ acc
+          collectUnqualified acc (impInfo, nameInfos)
+            | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = nameInfos ++ acc
+            | otherwise = acc
+
   -- Lookup a var name
-  resolveVarName :: RenamerEnv -> AST.VariableP -> ResolvedVariable
-  resolveVarName renamerEnv varP =
+  resolveVar :: RenamerEnv -> AST.VariableP -> ResolvedVariable
+  resolveVar renamerEnv varP =
     case renamerEnv.scope of
       [] -> NoVarFound
       (currScope : _) -> handle currScope

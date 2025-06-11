@@ -51,6 +51,23 @@ data GlblVarInfo = GlblVarInfo
   }
   deriving (Show, Eq)
 
+data NameKind
+  = DataDecl
+  | NewtypeDecl
+  | ClassDecl
+  deriving (Show, Eq)
+
+data GlblNameInfo = GlblNameInfo
+  { name :: Hir.Name
+  , importedFrom :: NES.NESet ImportInfo
+  , originatingMod :: ModuleText
+  , loc :: LineColRange
+  , requiresQualifier :: Bool
+  , decl :: Decl
+  , nameKind :: NameKind
+  }
+  deriving (Show, Eq)
+
 glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
 glblVarInfoToQualified glbl =
   QualifiedName glbl.originatingMod glbl.name.node.nodeText
@@ -140,14 +157,15 @@ resolvedLclVarToLoc resolvedVar =
 -- | Var infos for a name indexed by module
 -- TODO: change val to [GlblVarInfo]?
 type GlblVarInfoMap = Map.HashMap T.Text ImportVarInfoMap
-
 type ImportVarInfoMap = Map.HashMap ImportInfo [GlblVarInfo]
+type ImportNameInfoMap = Map.HashMap ImportInfo [GlblNameInfo]
+type GlblNameInfoMap = Map.HashMap T.Text ImportNameInfoMap
 
 data Scope = Scope
   { glblVarInfo :: GlblVarInfoMap
   , lclVarInfo :: Map.HashMap T.Text LocalVarInfo
+  , glblNameInfo :: GlblNameInfoMap
   }
-  deriving (Show)
 
 -- | Nodes which change the scope
 type ScopeChanger =
@@ -171,4 +189,5 @@ emptyScope =
   Scope
     { glblVarInfo = Map.empty
     , lclVarInfo = Map.empty
+    , glblNameInfo = Map.empty
     }
