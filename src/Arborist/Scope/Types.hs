@@ -51,10 +51,19 @@ data GlblVarInfo = GlblVarInfo
   }
   deriving (Show, Eq)
 
+-- how to handle value level names as opposed to type level names
+-- seperate value level names and type level names (diffrent map for vlaue level names)
+-- might make sense to combine variables w/ value level name (construct) (up to user discrection)
+-- seperate global type and global value level names
+-- merge type level names 
 data NameKind
   = DataDecl
   | NewtypeDecl
   | ClassDecl
+  | TypeDecl
+  | DataFamilyDecl
+  | TypeFamilyDecl
+  | TypeSynonymDecl
   deriving (Show, Eq)
 
 data GlblNameInfo = GlblNameInfo
@@ -71,6 +80,10 @@ data GlblNameInfo = GlblNameInfo
 glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
 glblVarInfoToQualified glbl =
   QualifiedName glbl.originatingMod glbl.name.node.nodeText
+
+
+glblNameInfoToQualified :: GlblNameInfo -> QualifiedName
+glblNameInfoToQualified name = QualifiedName name.originatingMod name.name.node.nodeText
 
 -- | Collect global var infos that have the same qualified name
 -- e.g. all global var infos with qualified name MyModule.fn1 will be collected
