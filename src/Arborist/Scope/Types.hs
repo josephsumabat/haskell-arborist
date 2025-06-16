@@ -77,10 +77,19 @@ data GlblNameInfo = GlblNameInfo
   }
   deriving (Show, Eq)
 
+data GlblConstructorInfo = GlblConstructorInfo
+  { name :: Hir.Name
+  , importedFrom :: NES.NESet ImportInfo
+  , originatingMod :: ModuleText
+  , loc :: LineColRange
+  , requiresQualifier :: Bool
+  , parentType :: T.Text
+  }
+  deriving (Show, Eq)
+
 glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
 glblVarInfoToQualified glbl =
   QualifiedName glbl.originatingMod glbl.name.node.nodeText
-
 
 glblNameInfoToQualified :: GlblNameInfo -> QualifiedName
 glblNameInfoToQualified name = QualifiedName name.originatingMod name.name.node.nodeText
@@ -173,11 +182,14 @@ type GlblVarInfoMap = Map.HashMap T.Text ImportVarInfoMap
 type ImportVarInfoMap = Map.HashMap ImportInfo [GlblVarInfo]
 type ImportNameInfoMap = Map.HashMap ImportInfo [GlblNameInfo]
 type GlblNameInfoMap = Map.HashMap T.Text ImportNameInfoMap
+type GlblConstructorInfoMap = Map.HashMap T.Text ImportConstructorInfoMap
+type ImportConstructorInfoMap = Map.HashMap ImportInfo [GlblConstructorInfo]
 
 data Scope = Scope
   { glblVarInfo :: GlblVarInfoMap
   , lclVarInfo :: Map.HashMap T.Text LocalVarInfo
   , glblNameInfo :: GlblNameInfoMap
+  , glblConstructorInfo :: GlblConstructorInfoMap
   }
 
 -- | Nodes which change the scope
@@ -203,4 +215,5 @@ emptyScope =
     { glblVarInfo = Map.empty
     , lclVarInfo = Map.empty
     , glblNameInfo = Map.empty
+    , glblConstructorInfo = Map.empty
     }

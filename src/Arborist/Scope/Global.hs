@@ -11,6 +11,7 @@ module Arborist.Scope.Global (
 where
 
 import AST
+import AST.Haskell qualified as AST
 import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
@@ -24,6 +25,11 @@ import GHC.Stack
 import Hir
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import Data.List.NonEmpty qualified as NE
+import AST.Haskell qualified as H
+import Data.Either.Extra (eitherToMaybe)
+import Data.List.NonEmpty qualified as NE
+import AST.Extension (ParsePhase)
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
@@ -266,7 +272,20 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
                 existing = Map.findWithDefault [] impInfo importMap
                 newImportMap = Map.insert impInfo (existing ++ [nameInfo]) importMap
              in Map.insert key newImportMap nameMap
-     in scope {glblVarInfo = updatedVarMap, glblNameInfo = updatedNameMap}
+
+
+        constructors = case availDecl.decl of
+          Hir.DeclData dataDecl -> extractDataConstructors dataDecl availDecl
+          Hir.DeclNewtype newtypeDecl -> extractNewtypeConstructor newtypeDecl availDecl  
+          _ -> []
+
+        updatedConstructorMap = addConstructorsToMap constructors scope.glblConstructorInfo
+
+      in scope { glblVarInfo = updatedVarMap
+                , glblNameInfo = updatedNameMap 
+                , glblConstructorInfo = updatedConstructorMap
+                }
+
 
   equalSig :: Hir.SigDecl -> Hir.SigDecl -> Bool
   equalSig s1 s2 =
@@ -345,3 +364,92 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
     | otherwise =
         let (result, rest) = tryMergeBind b requiresQualifier importedFrom origMod vs
          in (result, v : rest)
+
+  -- once we have all constructors add them to the map
+  addConstructorsToMap :: [GlblConstructorInfo] -> GlblConstructorInfoMap -> GlblConstructorInfoMap
+  addConstructorsToMap constructors currentMap = 
+    List.foldl' addSingleConstructor currentMap constructors
+
+  -- what is the reason for findMin????
+  addSingleConstructor :: GlblConstructorInfoMap -> GlblConstructorInfo -> GlblConstructorInfoMap
+  addSingleConstructor currentMap constructor =
+    let key = constructor.name.node.nodeText
+        impInfo = NES.findMin constructor.importedFrom
+        importMap = Map.findWithDefault Map.empty key currentMap
+        existing = Map.findWithDefault [] impInfo importMap
+        newImportMap = Map.insert impInfo (existing ++ [constructor]) importMap
+    in Map.insert key newImportMap currentMap
+
+ -- find all constructors
+  
+  extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractDataConstructors decl parentInfo =
+    case cast @H.DataTypeP (decl.node.dynNode) of
+      Nothing -> []
+      Just dataTypeNode ->
+        case unwrap dataTypeNode of
+          Left _ -> []
+          Right H.DataTypeU { constructors = mCons } ->
+            let name = decl.name.node.nodeText in
+            case mCons of
+              Just consSum ->
+
+                -- try the regular DataConstructors branch
+                case prj @(H.DataConstructors ParsePhase) consSum of
+                  Just dataConstructor ->
+                    case unwrap dataConstructor of
+                      Left _ -> []
+                      Right H.DataConstructorsU { constructor = nes } ->
+                        concatMap
+                          (\dataCon ->
+                            case unwrap dataCon of
+                              Left _ -> []
+                              Right H.DataConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
+                          (NE.toList nes)
+
+                  Nothing ->
+                    
+                    -- otherwise try the GADT branch
+                    case prj @(H.GadtConstructors ParsePhase) consSum of
+                      Just gadtConstructor ->
+                        case unwrap gadtConstructor of
+                          Left _ -> []
+                          Right H.GadtConstructorsU { constructor = nes } ->
+                            concatMap
+                              (\dataCon ->
+                                case unwrap dataCon of
+                                  Left _ -> []
+                                  Right H.GadtConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
+                              nes
+                      Nothing -> []
+
+              Nothing -> []
+          
+  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractNewtypeConstructor newtypeDecl parentInfo =
+    let constructorNodes = findAllConstructors newtypeDecl.node.dynNode
+    in map (makeConstructorInfo parentInfo newtypeDecl.name.node.nodeText) constructorNodes
+
+  -- hacky fix of just walking the ast, still doesnt work.
+  findAllConstructors :: AST.DynNode -> [AST.DynNode]
+  findAllConstructors node =
+    case (AST.cast @H.ConstructorP node, AST.cast @H.GadtConstructorP node) of
+      (Just _, _) -> [node]
+      (_, Just _) -> [node]
+      (Nothing, Nothing) -> concatMap findAllConstructors node.nodeChildren
+
+  makeConstructorInfo :: GlblDeclInfo -> T.Text -> AST.DynNode -> GlblConstructorInfo
+  makeConstructorInfo parentInfo parentTypeName conNode =
+    GlblConstructorInfo
+      { name = Hir.Name 
+          { node = conNode
+          , isOperator = False 
+          , isConstructor = True
+          }
+      , importedFrom = NES.singleton parentInfo.importedFrom
+      , originatingMod = parentInfo.originatingMod
+      , loc = conNode.nodeLineColRange
+      , requiresQualifier = parentInfo.requiresQualifier
+      , parentType = parentTypeName
+      }
+
