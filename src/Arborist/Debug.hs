@@ -10,7 +10,7 @@ import Arborist.Renamer
 import Data.Text.Lazy qualified as Text
 import Text.Pretty.Simple
 
-type PrintExt = Module RenamePhase AST.:+ Name RenamePhase AST.:+ Name ParsePhase AST.:+ Variable RenamePhase AST.:+ AST.Nil
+type PrintExt = Module RenamePhase AST.:+ Name RenamePhase AST.:+ Name ParsePhase AST.:+ Variable RenamePhase AST.:+ Constructor RenamePhase AST.:+ AST.Nil
 
 -- Helper function to format a single node
 debugNodeStr :: Int -> AST.DynNode -> Prelude.String
@@ -52,6 +52,8 @@ debugNodeStr indentLevel node =
           Just (AST.Inj @(Name ParsePhase) node) ->
             printNode node
           Just (AST.Inj @(Variable RenamePhase) node) ->
+            printNode node
+          Just (AST.Inj @(Constructor RenamePhase) node) ->
             printNode node
           Just _ -> printDynNode node
           Nothing -> printDynNode node

@@ -384,19 +384,14 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
   
   extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractDataConstructors decl parentInfo =
-    case cast @H.DataTypeP (decl.node.dynNode) of
-      Nothing -> []
-      Just dataTypeNode ->
+    let dataTypeNode = decl.node in
         case unwrap dataTypeNode of
           Left _ -> []
           Right H.DataTypeU { constructors = mCons } ->
             let name = decl.name.node.nodeText in
-            case mCons of
-              Just consSum ->
-
-                -- try the regular DataConstructors branch
-                case prj @(H.DataConstructors ParsePhase) consSum of
-                  Just dataConstructor ->
+              case mCons of
+              -- try the regular DataConstructors branch
+                Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
                     case unwrap dataConstructor of
                       Left _ -> []
                       Right H.DataConstructorsU { constructor = nes } ->
@@ -404,26 +399,22 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
                           (\dataCon ->
                             case unwrap dataCon of
                               Left _ -> []
-                              Right H.DataConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
+                              Right H.DataConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ]
+                          )
                           (NE.toList nes)
+                  -- otherwise try the GADT branch
+                Just (AST.Inj @H.GadtConstructorsP gadtConstructor) ->
+                          case unwrap gadtConstructor of
+                            Left _ -> []
+                            Right H.GadtConstructorsU { constructor = nes } ->
+                              concatMap
+                                (\dataCon ->
+                                  case unwrap dataCon of
+                                    Left _ -> []
+                                    Right H.GadtConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
+                                nes
 
-                  Nothing ->
-                    
-                    -- otherwise try the GADT branch
-                    case prj @(H.GadtConstructors ParsePhase) consSum of
-                      Just gadtConstructor ->
-                        case unwrap gadtConstructor of
-                          Left _ -> []
-                          Right H.GadtConstructorsU { constructor = nes } ->
-                            concatMap
-                              (\dataCon ->
-                                case unwrap dataCon of
-                                  Left _ -> []
-                                  Right H.GadtConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
-                              nes
-                      Nothing -> []
-
-              Nothing -> []
+                _ -> []
           
   extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractNewtypeConstructor newtypeDecl parentInfo =
