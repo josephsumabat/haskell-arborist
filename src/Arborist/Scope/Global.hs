@@ -30,6 +30,7 @@ import AST.Haskell qualified as H
 import Data.Either.Extra (eitherToMaybe)
 import Data.List.NonEmpty qualified as NE
 import AST.Extension (ParsePhase)
+import AST.Runtime
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
@@ -370,7 +371,6 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
   addConstructorsToMap constructors currentMap = 
     List.foldl' addSingleConstructor currentMap constructors
 
-  -- what is the reason for findMin????
   addSingleConstructor :: GlblConstructorInfoMap -> GlblConstructorInfo -> GlblConstructorInfoMap
   addSingleConstructor currentMap constructor =
     let key = constructor.name.node.nodeText
@@ -390,7 +390,7 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
           Right H.DataTypeU { constructors = mCons } ->
             let name = decl.name.node.nodeText in
               case mCons of
-              -- try the regular DataConstructors branch
+              -- regular DataConstructors branch
                 Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
                     case unwrap dataConstructor of
                       Left _ -> []
@@ -402,7 +402,7 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
                               Right H.DataConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ]
                           )
                           (NE.toList nes)
-                  -- otherwise try the GADT branch
+                  -- the GADT branch
                 Just (AST.Inj @H.GadtConstructorsP gadtConstructor) ->
                           case unwrap gadtConstructor of
                             Left _ -> []
@@ -416,19 +416,13 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
 
                 _ -> []
           
-  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
-  extractNewtypeConstructor newtypeDecl parentInfo =
-    let constructorNodes = findAllConstructors newtypeDecl.node.dynNode
-    in map (makeConstructorInfo parentInfo newtypeDecl.name.node.nodeText) constructorNodes
-
-  -- hacky fix of just walking the ast, still doesnt work.
-  findAllConstructors :: AST.DynNode -> [AST.DynNode]
-  findAllConstructors node =
-    case (AST.cast @H.ConstructorP node, AST.cast @H.GadtConstructorP node) of
-      (Just _, _) -> [node]
-      (_, Just _) -> [node]
-      (Nothing, Nothing) -> concatMap findAllConstructors node.nodeChildren
-
+  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo-> [GlblConstructorInfo]
+  extractNewtypeConstructor decl parentInfo =
+    case unwrap (decl.node) of
+      Right H.NewtypeU { dynNode = constructorDyn } ->
+        [ makeConstructorInfo parentInfo (decl.name.node.nodeText) constructorDyn]
+      _ -> []
+      
   makeConstructorInfo :: GlblDeclInfo -> T.Text -> AST.DynNode -> GlblConstructorInfo
   makeConstructorInfo parentInfo parentTypeName conNode =
     GlblConstructorInfo
