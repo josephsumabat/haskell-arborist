@@ -21,6 +21,14 @@ import Data.Text qualified as T
 import Hir.Types
 import TreeSitter.Api
 
+parsePrefix :: H.PrefixP -> Maybe Name
+parsePrefix p =
+        let name = (AST.unwrapMaybe p >>= (.name)) in
+        case name of
+          Just (AST.Inj @H.ConstructorP c) -> Just $ parseName $ AST.Inj c
+          Just (AST.Inj @H.PrefixIdP p)  -> eitherToMaybe . parseNamePrefix $ AST.Inj p
+          _ -> Nothing
+
 parseName :: ParseNameTypes -> Name
 parseName ast = case ast of
   AST.Inj @H.NameP _ ->

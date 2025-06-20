@@ -10,6 +10,7 @@ module Arborist.Scope.Global (
 )
 where
 
+import Arborist.Debug.Trace
 import AST
 import AST.Haskell qualified as AST
 import Arborist.Exports
@@ -31,6 +32,8 @@ import Data.Either.Extra (eitherToMaybe)
 import Data.List.NonEmpty qualified as NE
 import AST.Extension (ParsePhase)
 import AST.Runtime
+import Hir.Parse
+import AST.Unwrap qualified
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
@@ -277,13 +280,13 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
 
         constructors = case availDecl.decl of
           Hir.DeclData dataDecl -> extractDataConstructors dataDecl availDecl
-          Hir.DeclNewtype newtypeDecl -> extractNewtypeConstructor newtypeDecl availDecl  
+          Hir.DeclNewtype newtypeDecl -> extractNewtypeConstructor newtypeDecl availDecl
           _ -> []
 
         updatedConstructorMap = addConstructorsToMap constructors scope.glblConstructorInfo
 
       in scope { glblVarInfo = updatedVarMap
-                , glblNameInfo = updatedNameMap 
+                , glblNameInfo = updatedNameMap
                 , glblConstructorInfo = updatedConstructorMap
                 }
 
@@ -368,7 +371,7 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
 
   -- once we have all constructors add them to the map
   addConstructorsToMap :: [GlblConstructorInfo] -> GlblConstructorInfoMap -> GlblConstructorInfoMap
-  addConstructorsToMap constructors currentMap = 
+  addConstructorsToMap constructors currentMap =
     List.foldl' addSingleConstructor currentMap constructors
 
   addSingleConstructor :: GlblConstructorInfoMap -> GlblConstructorInfo -> GlblConstructorInfoMap
@@ -381,14 +384,13 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
     in Map.insert key newImportMap currentMap
 
  -- find all constructors
-  
+
   extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractDataConstructors decl parentInfo =
     let dataTypeNode = decl.node in
         case unwrap dataTypeNode of
           Left _ -> []
           Right H.DataTypeU { constructors = mCons } ->
-            let name = decl.name.node.nodeText in
               case mCons of
               -- regular DataConstructors branch
                 Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
@@ -397,44 +399,49 @@ globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
                       Right H.DataConstructorsU { constructor = nes } ->
                         concatMap
                           (\dataCon ->
-                            case unwrap dataCon of
-                              Left _ -> []
-                              Right H.DataConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ]
+                                let mName = parseDataConName dataCon in
+                                maybeToList $ makeConstructorInfo parentInfo dataCon.dynNode <$> mName
                           )
                           (NE.toList nes)
-                  -- the GADT branch
-                Just (AST.Inj @H.GadtConstructorsP gadtConstructor) ->
-                          case unwrap gadtConstructor of
-                            Left _ -> []
-                            Right H.GadtConstructorsU { constructor = nes } ->
-                              concatMap
-                                (\dataCon ->
-                                  case unwrap dataCon of
-                                    Left _ -> []
-                                    Right H.GadtConstructorU { dynNode = constructorNode } -> [ makeConstructorInfo parentInfo name constructorNode ])
-                                nes
-
+                  -- TODO: the GADT branch
+                Just (AST.Inj @H.GadtConstructorsP _gadtConstructor) -> []
                 _ -> []
-          
-  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo-> [GlblConstructorInfo]
+
+  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractNewtypeConstructor decl parentInfo =
     case unwrap (decl.node) of
-      Right H.NewtypeU { dynNode = constructorDyn } ->
-        [ makeConstructorInfo parentInfo (decl.name.node.nodeText) constructorDyn]
+      Right H.NewtypeU { dynNode = constructorDyn, constructor = constructorNode } ->
+        let mName = parseNewtypeConName =<< constructorNode in
+        maybeToList $ makeConstructorInfo parentInfo constructorDyn <$> mName
       _ -> []
-      
-  makeConstructorInfo :: GlblDeclInfo -> T.Text -> AST.DynNode -> GlblConstructorInfo
-  makeConstructorInfo parentInfo parentTypeName conNode =
+
+  parseDataConName :: AST.DataConstructorP -> Maybe Hir.Name
+  parseDataConName dataConNode =
+    case (.constructor) <$> AST.unwrapMaybe dataConNode of
+      Just (AST.Inj @H.PrefixP p) ->
+        parsePrefix p
+      Just (AST.Inj @H.RecordP r) ->
+        parseName . AST.Inj <$> (AST.unwrapMaybe r >>= (.name))
+      _ -> Nothing
+
+  parseNewtypeConName :: AST.NewtypeConstructorP -> Maybe Hir.Name
+  parseNewtypeConName newtypeCon =
+    case (.name) <$> AST.unwrapMaybe newtypeCon of
+      Just (AST.Inj @H.PrefixIdP p) ->
+        eitherToMaybe $ parseNamePrefix (AST.Inj p)
+      Just (AST.Inj @H.ConstructorP r) ->
+        Just $ parseName (AST.Inj r)
+      _ -> Nothing
+
+  makeConstructorInfo :: GlblDeclInfo -> DynNode -> Hir.Name -> GlblConstructorInfo
+  makeConstructorInfo parentInfo conNode name =
     GlblConstructorInfo
-      { name = Hir.Name 
-          { node = conNode
-          , isOperator = False 
-          , isConstructor = True
-          }
+      { name = name
       , importedFrom = NES.singleton parentInfo.importedFrom
       , originatingMod = parentInfo.originatingMod
       , loc = conNode.nodeLineColRange
       , requiresQualifier = parentInfo.requiresQualifier
-      , parentType = parentTypeName
+      , parentType = parentInfo
+      , node = conNode
       }
 

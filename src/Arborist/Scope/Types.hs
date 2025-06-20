@@ -83,7 +83,8 @@ data GlblConstructorInfo = GlblConstructorInfo
   , originatingMod :: ModuleText
   , loc :: LineColRange
   , requiresQualifier :: Bool
-  , parentType :: T.Text
+  , parentType :: GlblDeclInfo
+  , node :: DynNode
   }
   deriving (Show, Eq)
 
