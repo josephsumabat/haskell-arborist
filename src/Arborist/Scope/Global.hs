@@ -10,7 +10,9 @@ module Arborist.Scope.Global (
 )
 where
 
+import Arborist.Debug.Trace
 import AST
+import AST.Haskell qualified as AST
 import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
@@ -24,6 +26,14 @@ import GHC.Stack
 import Hir
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import Data.List.NonEmpty qualified as NE
+import AST.Haskell qualified as H
+import Data.Either.Extra (eitherToMaybe)
+import Data.List.NonEmpty qualified as NE
+import AST.Extension (ParsePhase)
+import AST.Runtime
+import Hir.Parse
+import AST.Unwrap qualified
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
@@ -206,33 +216,33 @@ getGlobalAvalibleDecls availPrgs exportIdx thisPrg =
    in
     declaredNames <> importedNames
 
-declToNameInfo ::  GlblDeclInfo -> Maybe GlblNameInfo
+declToNameInfo :: GlblDeclInfo -> Maybe GlblNameInfo
 declToNameInfo d =
   case d.decl of
-    Hir.DeclData    dd -> Just (mk DataDecl   (dd.name) (dd.node))
+    Hir.DeclData dd -> Just (mk DataDecl (dd.name) (dd.node))
     Hir.DeclNewtype nt -> Just (mk NewtypeDecl (nt.name) (nt.node))
-    Hir.DeclClass   cl -> Just (mk ClassDecl  (cl.name) (cl.node))
-    _                  -> Nothing
+    Hir.DeclClass cl -> Just (mk ClassDecl (cl.name) (cl.node))
+    Hir.DeclDataFamily df -> Just (mk DataFamilyDecl (df.name) (df.node))
+    Hir.DeclTypeFamily tf -> Just (mk TypeFamilyDecl (tf.name) (tf.node))
+    Hir.DeclTypeSynonym ts -> Just (mk TypeSynonymDecl (ts.name) (ts.node))
+    _ -> Nothing
  where
   mk kind actualName astNode =
     let nodeInfo = getDynNode astNode
-    in GlblNameInfo
-         { name              = actualName
-         , importedFrom      = NES.singleton d.importedFrom
-         , originatingMod    = d.originatingMod
-         , loc               = nodeInfo.nodeLineColRange
-         , requiresQualifier = d.requiresQualifier
-         , decl              = d.decl
-         , nameKind          = kind
-         }
--- DUC 3409, get the name put it in, if there is an error where two things with the same name, return both and return ambigous name while resolving\
-  -- add every avalible name to list
-  -- Map of Text to a List of a global name info
+     in GlblNameInfo
+          { name = actualName
+          , importedFrom = NES.singleton d.importedFrom
+          , originatingMod = d.originatingMod
+          , loc = nodeInfo.nodeLineColRange
+          , requiresQualifier = d.requiresQualifier
+          , decl = d.decl
+          , nameKind = kind
+          }
 
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
 globalDeclsToScope :: [GlblDeclInfo] -> Scope
-globalDeclsToScope  availDecl = List.foldl' indexDeclInfo emptyScope availDecl
+globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
  where
   indexDeclInfo :: Scope -> GlblDeclInfo -> Scope
   indexDeclInfo scope availDecl =
@@ -259,15 +269,27 @@ globalDeclsToScope  availDecl = List.foldl' indexDeclInfo emptyScope availDecl
         updatedNameMap = case mNameInfo of
           Nothing -> nameMap
           Just nameInfo ->
-            let key   = nameInfo.name.node.nodeText
-                impInfo     = importedMod
-                nameMap    = scope.glblNameInfo
-                importMap  = Map.findWithDefault Map.empty key nameMap
-                existing    = Map.findWithDefault [] impInfo importMap
-                newImportMap  = Map.insert impInfo (existing ++ [nameInfo]) importMap
-            in Map.insert key newImportMap nameMap
+            let key = nameInfo.name.node.nodeText
+                impInfo = importedMod
+                nameMap = scope.glblNameInfo
+                importMap = Map.findWithDefault Map.empty key nameMap
+                existing = Map.findWithDefault [] impInfo importMap
+                newImportMap = Map.insert impInfo (existing ++ [nameInfo]) importMap
+             in Map.insert key newImportMap nameMap
 
-     in scope {glblVarInfo = updatedVarMap, glblNameInfo = updatedNameMap}
+
+        constructors = case availDecl.decl of
+          Hir.DeclData dataDecl -> extractDataConstructors dataDecl availDecl
+          Hir.DeclNewtype newtypeDecl -> extractNewtypeConstructor newtypeDecl availDecl
+          _ -> []
+
+        updatedConstructorMap = addConstructorsToMap constructors scope.glblConstructorInfo
+
+      in scope { glblVarInfo = updatedVarMap
+                , glblNameInfo = updatedNameMap
+                , glblConstructorInfo = updatedConstructorMap
+                }
+
 
   equalSig :: Hir.SigDecl -> Hir.SigDecl -> Bool
   equalSig s1 s2 =
@@ -346,3 +368,80 @@ globalDeclsToScope  availDecl = List.foldl' indexDeclInfo emptyScope availDecl
     | otherwise =
         let (result, rest) = tryMergeBind b requiresQualifier importedFrom origMod vs
          in (result, v : rest)
+
+  -- once we have all constructors add them to the map
+  addConstructorsToMap :: [GlblConstructorInfo] -> GlblConstructorInfoMap -> GlblConstructorInfoMap
+  addConstructorsToMap constructors currentMap =
+    List.foldl' addSingleConstructor currentMap constructors
+
+  addSingleConstructor :: GlblConstructorInfoMap -> GlblConstructorInfo -> GlblConstructorInfoMap
+  addSingleConstructor currentMap constructor =
+    let key = constructor.name.node.nodeText
+        impInfo = NES.findMin constructor.importedFrom
+        importMap = Map.findWithDefault Map.empty key currentMap
+        existing = Map.findWithDefault [] impInfo importMap
+        newImportMap = Map.insert impInfo (existing ++ [constructor]) importMap
+    in Map.insert key newImportMap currentMap
+
+ -- find all constructors
+
+  extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractDataConstructors decl parentInfo =
+    let dataTypeNode = decl.node in
+        case unwrap dataTypeNode of
+          Left _ -> []
+          Right H.DataTypeU { constructors = mCons } ->
+              case mCons of
+              -- regular DataConstructors branch
+                Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
+                    case unwrap dataConstructor of
+                      Left _ -> []
+                      Right H.DataConstructorsU { constructor = nes } ->
+                        concatMap
+                          (\dataCon ->
+                                let mName = parseDataConName dataCon in
+                                maybeToList $ makeConstructorInfo parentInfo dataCon.dynNode <$> mName
+                          )
+                          (NE.toList nes)
+                  -- TODO: the GADT branch
+                Just (AST.Inj @H.GadtConstructorsP _gadtConstructor) -> []
+                _ -> []
+
+  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractNewtypeConstructor decl parentInfo =
+    case unwrap (decl.node) of
+      Right H.NewtypeU { dynNode = constructorDyn, constructor = constructorNode } ->
+        let mName = parseNewtypeConName =<< constructorNode in
+        maybeToList $ makeConstructorInfo parentInfo constructorDyn <$> mName
+      _ -> []
+
+  parseDataConName :: AST.DataConstructorP -> Maybe Hir.Name
+  parseDataConName dataConNode =
+    case (.constructor) <$> AST.unwrapMaybe dataConNode of
+      Just (AST.Inj @H.PrefixP p) ->
+        parsePrefix p
+      Just (AST.Inj @H.RecordP r) ->
+        parseName . AST.Inj <$> (AST.unwrapMaybe r >>= (.name))
+      _ -> Nothing
+
+  parseNewtypeConName :: AST.NewtypeConstructorP -> Maybe Hir.Name
+  parseNewtypeConName newtypeCon =
+    case (.name) <$> AST.unwrapMaybe newtypeCon of
+      Just (AST.Inj @H.PrefixIdP p) ->
+        eitherToMaybe $ parseNamePrefix (AST.Inj p)
+      Just (AST.Inj @H.ConstructorP r) ->
+        Just $ parseName (AST.Inj r)
+      _ -> Nothing
+
+  makeConstructorInfo :: GlblDeclInfo -> DynNode -> Hir.Name -> GlblConstructorInfo
+  makeConstructorInfo parentInfo conNode name =
+    GlblConstructorInfo
+      { name = name
+      , importedFrom = NES.singleton parentInfo.importedFrom
+      , originatingMod = parentInfo.originatingMod
+      , loc = conNode.nodeLineColRange
+      , requiresQualifier = parentInfo.requiresQualifier
+      , parentType = parentInfo
+      , node = conNode
+      }
+
