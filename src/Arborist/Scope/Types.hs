@@ -51,11 +51,6 @@ data GlblVarInfo = GlblVarInfo
   }
   deriving (Show, Eq)
 
--- how to handle value level names as opposed to type level names
--- seperate value level names and type level names (diffrent map for vlaue level names)
--- might make sense to combine variables w/ value level name (construct) (up to user discrection)
--- seperate global type and global value level names
--- merge type level names 
 data NameKind
   = DataDecl
   | NewtypeDecl
