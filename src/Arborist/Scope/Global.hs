@@ -86,6 +86,7 @@ getImportDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import ->
 getImportDecls prgIdx exportIdx imp =
   getImportDecls' prgIdx exportIdx Set.empty imp
 
+-- TODO: Instead of removing an import if it is hidden, just tag it instead of excluding it, when we are doing the renaming make sure the import is avalible to be used
 -- Internal cycle-safe versions
 getImportDecls' ::
   (HasCallStack) =>
@@ -99,18 +100,9 @@ getImportDecls' prgIndex exportIndex inProgress thisImport =
       mod = thisImport.mod
       alias = fromMaybe thisImport.mod thisImport.alias
       (exportedNames, updatedExportIndex) = getExportedDecls' prgIndex exportIndex inProgress mod
-      importInfo =
-        ImportInfo
-          { mod = mod
-          , namespace = alias
-          }
+      importInfo = ImportInfo { mod = mod, namespace = alias }
       glblNameInfo = exportToInfo importInfo qualified <$> exportedNames
-      importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> thisImport.importList
-      importList
-        | null importNames = glblNameInfo
-        | thisImport.hiding = filter (\n -> not (Set.member n.name importNames)) glblNameInfo
-        | otherwise = filter (\n -> Set.member n.name importNames) glblNameInfo
-   in (importList, updatedExportIndex)
+    in (glblNameInfo, updatedExportIndex)
 
 getManyImportDecls' ::
   (HasCallStack) =>
@@ -201,6 +193,7 @@ getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedDecl]
 getDeclaredNames mod prg =
   fmap (declToExportedName mod) prg.decls
 
+-- this brings all possible decls into scope including hidden ones (but tagged), add tag
 getGlobalAvalibleDecls :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
 getGlobalAvalibleDecls availPrgs exportIdx thisPrg =
   let
@@ -239,11 +232,37 @@ declToNameInfo d =
           , nameKind = kind
           }
 
+-- TODO filter hidden here instead
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
-globalDeclsToScope :: [GlblDeclInfo] -> Scope
-globalDeclsToScope availDecl = List.foldl' indexDeclInfo emptyScope availDecl
+globalDeclsToScope :: [GlblDeclInfo] -> [Hir.Import] -> Scope
+globalDeclsToScope availDecl imports = 
+  let filteredDecl = filterHiddenItems availDecl imports
+  in List.foldl' indexDeclInfo emptyScope filteredDecl
  where
+  filterHiddenItems :: [GlblDeclInfo] -> [Hir.Import] -> [GlblDeclInfo]
+  filterHiddenItems decls imps = 
+    filter (not . isHidden imps) decls
+    
+  isHidden :: [Hir.Import] -> GlblDeclInfo -> Bool
+  isHidden imps declInfo = 
+    case findMatchingImport imps declInfo of
+      Nothing -> False
+      Just imp -> shouldBeHidden imp declInfo
+      
+  findMatchingImport :: [Hir.Import] -> GlblDeclInfo -> Maybe Hir.Import
+  findMatchingImport imps declInfo = List.find (\imp -> imp.mod == declInfo.importedFrom.mod) imps
+    
+  shouldBeHidden :: Hir.Import -> GlblDeclInfo -> Bool  
+  shouldBeHidden imp declInfo =
+    let importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> imp.importList
+    in if null importNames
+        then False
+       else if imp.hiding
+        then Set.member declInfo.name importNames
+       else 
+          not (Set.member declInfo.name importNames)
+
   indexDeclInfo :: Scope -> GlblDeclInfo -> Scope
   indexDeclInfo scope availDecl =
     let declKey = availDecl.name
