@@ -22,7 +22,7 @@ spec = do
       let [prog] = programs
           haskelProgram = prog.node
           importNode = findNode (AST.cast @H.ImportP) (AST.getDynNode haskelProgram)
-          testDecl = (getDecls prog) !! 1
+          testDecl = head (getDecls prog)
 
       case importNode of
         Just import' -> do

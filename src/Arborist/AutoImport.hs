@@ -22,6 +22,13 @@ declToImportRewrite decl =
             | name.isOperator = "(" <> nameText <> ")"
             | otherwise = nameText
       in  Just (ImportRewrite nameText wrapped)
+    Hir.DeclSig sig ->
+      let name = sig.name
+          nameText = name.node.nodeText
+          wrapped
+            | name.isOperator = "(" <> nameText <> ")"
+            | otherwise = nameText
+      in  Just (ImportRewrite nameText wrapped)
     Hir.DeclData decl  ->
       let name = decl.name
           nameText = name.node.nodeText
