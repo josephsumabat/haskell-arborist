@@ -86,7 +86,6 @@ getImportDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import ->
 getImportDecls prgIdx exportIdx imp =
   getImportDecls' prgIdx exportIdx Set.empty imp
 
--- TODO: Instead of removing an import if it is hidden, just tag it instead of excluding it, when we are doing the renaming make sure the import is avalible to be used
 -- Internal cycle-safe versions
 getImportDecls' ::
   (HasCallStack) =>
@@ -232,7 +231,6 @@ declToNameInfo d =
           , nameKind = kind
           }
 
--- TODO filter hidden here instead
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
 globalDeclsToScope :: [GlblDeclInfo] -> [Hir.Import] -> Scope
