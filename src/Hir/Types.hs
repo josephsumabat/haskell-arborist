@@ -119,12 +119,12 @@ data Import = Import
   , alias :: Maybe ModuleText
   , qualified :: !Bool
   , hiding :: !Bool
-  , importList :: [ImportItem]
+  , importList :: Maybe [ImportItem]
   }
   deriving (Show, Eq)
 
 pattern OpenImport :: ModuleText -> Import
-pattern OpenImport mod = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = []}
+pattern OpenImport mod = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing}
 
 type ParseNameTypes =
   Haskell.NameP
