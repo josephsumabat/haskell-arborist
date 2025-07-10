@@ -273,7 +273,6 @@ parseImport i = do
   alias <- traverse parseModuleText alias
   importList <- AST.collapseErr i.names
   importList <- traverse parseImportList importList
-  importList <- pure $ importList
   let qualified = Maybe.isJust $ findNode (AST.cast @(AST.Token "qualified")) (AST.getDynNode i)
   let hiding = Maybe.isJust $ findNode (AST.cast @(AST.Token "hiding")) (AST.getDynNode i)
   pure

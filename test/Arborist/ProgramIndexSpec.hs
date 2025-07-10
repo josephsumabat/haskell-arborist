@@ -18,20 +18,20 @@ import TestImport
 spec :: Spec
 spec = do
   describe "getPrgs" $ do
-    -- describe "golden" $ do
-    --   it "works with no initial map" $ do
-    --     let mods =
-    --           [
-    --             ( parseModuleTextFromText "Data.List"
-    --             , testDataDir </> "Data/List.hs"
-    --             )
-    --           ,
-    --             ( parseModuleTextFromText "Data.IORef"
-    --             , testDataDir </> "Data/IORef.hs"
-    --             )
-    --           ]
-    --     prgs <- getPrgs Map.empty mods
-    --     pure $ defaultGolden "getPrgs_no_initial_map" (show prgs)
+    describe "golden" $ do
+      xit "works with no initial map" $ do
+        let mods =
+              [
+                ( parseModuleTextFromText "Data.List"
+                , testDataDir </> "Data/List.hs"
+                )
+              ,
+                ( parseModuleTextFromText "Data.IORef"
+                , testDataDir </> "Data/IORef.hs"
+                )
+              ]
+        prgs <- getPrgs Map.empty mods
+        pure $ defaultGolden "getPrgs_no_initial_map" (show prgs)
 
   describe "gatherScopeDeps" $ do
     it "includes target module and its direct imports at depth 0" $ do
