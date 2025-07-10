@@ -19,7 +19,7 @@ spec :: Spec
 spec = do
   describe "getPrgs" $ do
     describe "golden" $ do
-      xit "works with no initial map" $ do
+      it "works with no initial map" $ do
         let mods =
               [
                 ( parseModuleTextFromText "Data.List"
