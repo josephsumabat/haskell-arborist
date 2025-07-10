@@ -253,14 +253,13 @@ globalDeclsToScope availDecl imports =
     
   shouldBeHidden :: Hir.Import -> GlblDeclInfo -> Bool  
   shouldBeHidden imp declInfo =
-    let importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> imp.importList
-    in if null importNames
-        then False
-       else if imp.hiding
-        then Set.member declInfo.name importNames
-       else 
-          not (Set.member declInfo.name importNames)
-
+    case imp.importList of
+      Nothing -> False
+      Just items ->
+        let importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> items
+            isInList = Set.member declInfo.name importNames
+        in if imp.hiding then isInList else not isInList
+        
   indexDeclInfo :: Scope -> GlblDeclInfo -> Scope
   indexDeclInfo scope availDecl =
     let declKey = availDecl.name

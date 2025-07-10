@@ -1,7 +1,6 @@
 module Arborist.AutoImport where
 
 import Hir.Types qualified as Hir
-import AST.Haskell qualified as H
 import AST qualified
 import Data.Edit as Edit ( Edit, empty )
 import Arborist.Rewrite (rewriteNode)
@@ -46,25 +45,24 @@ declToImportRewrite decl =
       in Just (ImportRewrite nameText renderedName)
     _ -> Nothing
 
--- add to existing import list (need to add special cases, no (), alias, qualified, etc.)
-addToImportList :: ImportRewrite -> H.ImportP -> Text
-addToImportList rewrite importNode =
-  let importNodeDyn = AST.getDynNode importNode
-      newItem = rewrite.renderedName
-      originalImportText = importNodeDyn.nodeText
-      beforeParen = Text.takeWhile (/= '(') originalImportText
-      afterParen = Text.dropWhile (/= '(') originalImportText
-      currentList = Text.drop 1 $ Text.dropEnd 1 afterParen
-      newList = if Text.null (Text.strip currentList)
-                then newItem
-                else currentList <> ", " <> newItem
-  in beforeParen <> "(" <> newList <> ")"
+addToImportList :: ImportRewrite -> Hir.Import -> Text -> Text
+addToImportList rewrite hirImport originalText =
+  case hirImport.importList of
+    Nothing -> originalText <> " (" <> rewrite.renderedName <> ")"
+    Just [] ->
+      let beforeParen = Text.takeWhile (/= '(') originalText
+      in beforeParen <> "(" <> rewrite.renderedName <> ")"
+    Just _ ->
+      let beforeParen = Text.takeWhile (/= '(') originalText
+          afterParen = Text.dropWhile (/= '(') originalText
+          currentList = Text.drop 1 $ Text.dropEnd 1 afterParen
+      in beforeParen <> "(" <> currentList <> ", " <> rewrite.renderedName <> ")"
 
-
-addDeclToImportEdit :: H.ImportP -> Hir.Decl -> Edit
-addDeclToImportEdit importNode decl =
+addDeclToImportEdit :: AST.DynNode -> Hir.Import -> Hir.Decl -> Edit
+addDeclToImportEdit importNode hirImport decl =
   case declToImportRewrite decl of
     Nothing -> Edit.empty
-    Just importRewrite -> rewriteNode (AST.getDynNode importNode) (addToImportList importRewrite importNode)
-
-
+    Just importRewrite -> 
+      let originalText = importNode.nodeText
+          newText = addToImportList importRewrite hirImport originalText
+      in rewriteNode importNode newText
