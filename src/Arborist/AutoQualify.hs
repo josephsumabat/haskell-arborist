@@ -6,8 +6,8 @@ import Data.Edit as Edit (Edit, empty)
 import Arborist.Rewrite (rewriteNode)
 
 -- create an edit to qualify a usage with the appropriate qualifier
-qualifyUsageEdit :: AST.DynNode -> Hir.Import -> Edit
-qualifyUsageEdit usageNode hirImport =
+qualifyIdentifierEdit :: AST.DynNode -> Hir.Import -> Edit
+qualifyIdentifierEdit usageNode hirImport =
   if hirImport.qualified
     then
       let originalName = usageNode.nodeText
@@ -19,5 +19,5 @@ qualifyUsageEdit usageNode hirImport =
     else Edit.empty
 
 -- create an edit to qualify a declaration usage given its import
-qualifyDeclUsage :: AST.DynNode -> Hir.Import -> Edit
-qualifyDeclUsage declNode hirImport = qualifyUsageEdit declNode hirImport
+qualifyIdentifier :: AST.DynNode -> Hir.Import -> Edit
+qualifyIdentifier declNode hirImport = qualifyIdentifierEdit declNode hirImport

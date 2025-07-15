@@ -424,7 +424,7 @@ main = do
             [String]
     modFileMap <- buildModuleFileMap srcWithLps
     let onlySrc = ["../mercury-web-backend/src"]
-    let targetMod = parseModuleTextFromText "Handler.Expenses.Index"
+    let targetMod = parseModuleTextFromText "Handler.Expenses.Search.Sql"
         targetFile = maybe [] List.singleton (Map.lookup targetMod modFileMap)
     let src = srcWithLps
 
