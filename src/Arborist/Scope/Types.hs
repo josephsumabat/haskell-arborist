@@ -187,6 +187,7 @@ data Scope = Scope
   , glblNameInfo :: GlblNameInfoMap
   , glblConstructorInfo :: GlblConstructorInfoMap
   }
+  deriving (Show)
 
 -- | Nodes which change the scope
 type ScopeChanger =

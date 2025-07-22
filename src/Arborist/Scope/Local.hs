@@ -14,7 +14,6 @@ import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Debug.Trace
 import Hir
 import Hir.Types qualified as Hir
 
@@ -27,7 +26,7 @@ addManyLocalPatVars currScope pats =
 
 addLocalPatVars :: Scope -> Hir.Pattern -> Scope
 addLocalPatVars currScope pat =
-  let clearedScope = clearPrevLocalNames currScope ((.name) <$> pat.patVars)
+  let clearedScope = clearPrevLocalNames currScope (Hir.nameText . (.name) <$> pat.patVars)
    in List.foldl'
         (addLocalBind)
         clearedScope
@@ -115,9 +114,15 @@ getNewLocalDecl existing decl =
    in
     mNewLclVarInfo
  where
+  -- Note for binds we use the name location since a single raw bind
+  -- can have multiple names bound
   tryMergeBind :: Hir.BindDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeBind b [] =
-    (Just (LocalDecl {sig = Nothing, binds = [b], loc = (AST.getDynNode b.node).nodeLineColRange}), [])
+    (Just
+      (LocalDecl
+        {sig = Nothing, binds = [b]
+        , loc = (AST.getDynNode b.name.node).nodeLineColRange
+        }), [])
   tryMergeBind b (v : vs) =
     case v.binds of
       [] ->
@@ -133,7 +138,7 @@ getNewLocalDecl existing decl =
     LocalDecl
       { binds = [b]
       , sig = v.sig
-      , loc = (AST.getDynNode b.node).nodeLineColRange
+      , loc = (AST.getDynNode b.name.node).nodeLineColRange
       }
 
   tryMergeSig :: Hir.SigDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
@@ -167,16 +172,17 @@ addParam scope param =
             LocalParam
               { var = var
               }
-       in case Map.lookup var.name scope.lclVarInfo of
+          lclVarName = Hir.nameText var.name
+       in case Map.lookup lclVarName scope.lclVarInfo of
             Just (LocalVarParam p) ->
               scope
                 { lclVarInfo =
                     Map.insert
-                      var.name
+                      lclVarName
                       (LocalVarParam $ p <> NE.singleton lclVarInfo)
                       scope.lclVarInfo
                 }
             _ ->
-              let newLclVarInfo = Map.insert var.name (LocalVarParam $ NE.singleton lclVarInfo) scope.lclVarInfo
+              let newLclVarInfo = Map.insert lclVarName (LocalVarParam $ NE.singleton lclVarInfo) scope.lclVarInfo
                in scope {lclVarInfo = newLclVarInfo}
     _ -> scope

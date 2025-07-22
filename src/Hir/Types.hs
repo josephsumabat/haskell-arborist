@@ -29,6 +29,9 @@ data Name = Name
   , isConstructor :: !Bool
   }
 
+nameText :: Name -> Text
+nameText n = n.node.nodeText
+
 data NameShow = NameShow {name :: Text, node :: DynNode}
   deriving (Show, Eq)
 
@@ -155,6 +158,11 @@ data BindDecl = BindDecl
   }
   deriving (Show, Eq)
 
+data NameOrPat =
+  IsName Name
+    | IsPat Pattern
+  deriving (Show, Eq)
+
 data SigDecl = SigDecl
   { name :: Name
   , node :: H.SignatureP
@@ -254,7 +262,7 @@ data Pattern = Pattern
   deriving (Show, Eq)
 
 data Variable = Variable
-  { name :: Text
+  { name :: Name
   , dynNode :: DynNode
   }
   deriving (Show, Eq)
@@ -262,3 +270,4 @@ data Variable = Variable
 data LocalDecls = LocalDecls
   { decls :: [Decl]
   }
+  deriving (Show, Eq)

@@ -10,12 +10,11 @@ import Control.Applicative (asum, (<|>))
 import Control.Error (hush)
 import Control.Error qualified as Error
 import Control.Error.Util (note)
-import Control.Monad (guard)
+import Control.Monad (guard, join)
 import Data.Either qualified as Either
 import Data.Either.Extra (eitherToMaybe)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe qualified as Maybe
-import Data.Range (Range)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Hir.Types
@@ -323,25 +322,39 @@ parseDataType node = do
   name <- parseNamePrefix =<< removeQualified name
   pure DataDecl {name, node}
 
-parseBind :: H.DeclP -> AST.Err Decl
+parseBind :: H.DeclP -> AST.Err [Decl]
 parseBind decl = do
   case decl.getDecl of
     [AST.x1|bindNode|] -> do
       bind <- AST.unwrap bindNode
-      name <- Error.note "no bind name" bind.name
-      name <- parseNamePrefix $ AST.subset name
-      pure $ DeclBind BindDecl {name, node = AST.Inj bindNode}
+      let name = fmap IsName . parseNamePrefix . AST.subset <$> bind.name
+          pat =
+            Right . IsPat . parsePattern <$>
+              (AST.cast @H.PatternP =<< (AST.getDynNode <$> bind.pattern'))
+          nameOrPat = name <|> pat
+      case nameOrPat of
+        Just (Right (IsName name)) ->
+          pure [DeclBind BindDecl {name, node = AST.Inj bindNode}]
+        Just (Right (IsPat pats)) ->
+          pure $ DeclBind <$> patToBinds pats (AST.Inj bindNode)
+        Just (Left _) -> Left "failed to parse bind"
+        Nothing -> Left "no name or pattern found"
     [AST.x2|fnNode|] -> do
       fn <- AST.unwrap fnNode
       name <- Error.note "no function name" fn.name
       name <- parseNamePrefix $ AST.subset name
-      pure $ DeclBind BindDecl {name, node = AST.Inj fnNode}
+      pure $ [DeclBind BindDecl {name = name, node = AST.Inj fnNode}]
     [AST.x3|sigNode|] -> do
       sig <- AST.unwrap sigNode
       name <- Error.note "no signature name" sig.name
       name <- parseNamePrefix $ AST.subset name
-      pure $ DeclSig SigDecl {name, node = sigNode}
+      pure $ [DeclSig SigDecl {name, node = sigNode}]
     [AST.rest3|nil|] -> case nil of {}
+
+patToBinds :: Pattern -> (H.BindP :+ (H.FunctionP :+ AST.Nil)) -> [BindDecl]
+patToBinds pat parent =
+  (\v -> BindDecl { name = v.name, node = parent }) <$> pat.patVars
+  
 
 parseClass :: H.ClassP -> AST.Err Decl
 parseClass c = do
@@ -415,7 +428,7 @@ parseDeclaration :: H.DeclarationP -> AST.Err [Decl]
 parseDeclaration decl = case decl.getDeclaration of
   AST.Inj @H.DataTypeP d -> do
     pure @[] . DeclData <$> parseDataType d
-  AST.Inj @H.DeclP b -> pure @[] <$> parseBind b
+  AST.Inj @H.DeclP b -> parseBind b
   AST.Inj @H.ClassP c -> pure @[] <$> parseClass c
   AST.Inj @H.DataFamilyP d -> pure @[] <$> parseDataFamily d
   AST.Inj @H.NewtypeP n -> pure @[] <$> parseNewtype n
@@ -540,7 +553,7 @@ parsePatterns pats =
   getPats :: H.PatternsUP -> [Pattern]
   getPats patsU =
     parsePattern
-      <$> Maybe.mapMaybe (AST.cast @H.PatternP) pats.dynNode.nodeChildren
+      <$> Maybe.mapMaybe (AST.cast @H.PatternP) patsU.dynNode.nodeChildren
 
 parsePattern :: H.PatternP -> Pattern
 parsePattern pat =
@@ -552,10 +565,10 @@ parsePattern pat =
   getVars n =
     case AST.cast @H.VariableP n of
       Nothing -> n.nodeChildren >>= getVars
-      Just _v ->
+      Just v ->
         let newVar =
               Variable
-                { name = n.nodeText
+                { name = parseName (AST.Inj v)
                 , dynNode = n
                 }
          in newVar : (n.nodeChildren >>= getVars)
@@ -566,7 +579,7 @@ parseLocalBinds localBinds =
       mDeclU = fmap AST.getDynNode . (.decl) <$> mLocalBindsU
    in case mDeclU of
         Nothing -> LocalDecls []
-        Just declU -> LocalDecls $ Maybe.mapMaybe parseBindDecl declU
+        Just declU -> LocalDecls $ join $ Maybe.mapMaybe parseBindDecl declU
  where
   parseBindDecl n =
     eitherToMaybe . parseBind =<< (AST.cast @H.DeclP n)

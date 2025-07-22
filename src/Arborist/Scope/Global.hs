@@ -10,7 +10,6 @@ module Arborist.Scope.Global (
 )
 where
 
-import Arborist.Debug.Trace
 import AST
 import AST.Haskell qualified as AST
 import Arborist.Exports
@@ -29,11 +28,7 @@ import Hir.Types qualified as Hir
 import Data.List.NonEmpty qualified as NE
 import AST.Haskell qualified as H
 import Data.Either.Extra (eitherToMaybe)
-import Data.List.NonEmpty qualified as NE
-import AST.Extension (ParsePhase)
-import AST.Runtime
 import Hir.Parse
-import AST.Unwrap qualified
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
