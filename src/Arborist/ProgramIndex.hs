@@ -48,8 +48,9 @@ indexImports ::
   Maybe Int ->
   IO ProgramIndex
 indexImports prgs thisPrg modFileMap maxDepth = do
-  let requiredFilesWithSrc =
-        getModFiles modFileMap ((.mod) <$> thisPrg.imports)
+  let imports = getImports thisPrg
+      requiredFilesWithSrc =
+        getModFiles modFileMap ((.mod) <$> imports)
   (importedPrgs, prgs') <- getPrgs prgs requiredFilesWithSrc
   allPrgs <-
     foldl'
@@ -102,15 +103,16 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
 
       -- Determine dependencies
       let (_reexportedMods, requiredModules) =
+            let imports = getImports prg in
             case prg.exports of
-              Nothing -> ([], (.mod) <$> prg.imports)
+              Nothing -> ([], (.mod) <$> imports)
               Just exports ->
                 let
                   reExportedAliases = (.mod) <$> exportItemMods exports
                   aliasModMap = getAliasModMap prg
                   reExportedMods = modsFromAliases aliasModMap reExportedAliases
-                  allImportMods = (.mod) <$> prg.imports
-                  exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) prg.imports
+                  allImportMods = (.mod) <$> imports
+                  exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) imports
                   transitiveNames = getTransitiveReExportNames prg exports
                   req =
                     if Set.null transitiveNames

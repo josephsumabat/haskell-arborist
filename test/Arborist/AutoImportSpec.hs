@@ -123,7 +123,7 @@ spec = do
       case importNode of
         Just import' -> do
           let dynNode = AST.getDynNode import'
-              hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
+              hirImport =  fromRight (error "Failed to parse import") $ Parse.parseImport import'
               changes = getChanges (addDeclToImportEdit dynNode hirImport operatorDecl)
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "import TestTypes ((***))"

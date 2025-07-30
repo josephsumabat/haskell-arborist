@@ -281,6 +281,7 @@ parseImport i = do
       , qualified
       , hiding
       , importList
+      , dynNode = AST.getDynNode i
       }
 
 parseQualified :: ParseQualifiedTypes -> AST.Err Qualified

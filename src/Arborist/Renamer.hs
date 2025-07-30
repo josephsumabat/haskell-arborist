@@ -126,7 +126,7 @@ renamePrg availPrgs exportIdx prg =
         Bifunctor.bimap
           (Set.fromList . fmap getImportModName)
           (Set.fromList . fmap getImportModName)
-          (List.partition (\imp -> imp.qualified) prg.imports)
+          (List.partition (\imp -> imp.qualified) (Hir.getImports prg))
       renamerEnv =
         RenamerEnv
           { qualifiedImports

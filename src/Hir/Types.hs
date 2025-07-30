@@ -13,6 +13,14 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 
+data WithNode node a =
+  WithNode
+    {
+      val :: a
+    , node :: node
+    }
+  deriving (Show, Eq)
+
 data NameSpace
   = NameSpaceValue
   | NameSpaceType
@@ -117,17 +125,20 @@ data ImportName = ImportName
   }
   deriving (Show, Eq)
 
+
+
 data Import = Import
   { mod :: ModuleText
   , alias :: Maybe ModuleText
   , qualified :: !Bool
   , hiding :: !Bool
   , importList :: Maybe [ImportItem]
+  , dynNode :: !AST.DynNode
   }
   deriving (Show, Eq)
 
-pattern OpenImport :: ModuleText -> Import
-pattern OpenImport mod = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing}
+pattern OpenImport :: ModuleText -> AST.DynNode -> Import
+pattern OpenImport mod dynNode = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing, dynNode}
 
 type ParseNameTypes =
   Haskell.NameP
@@ -224,6 +235,9 @@ data Program = Program
   , node :: Haskell.HaskellP
   }
   deriving (Show, Eq)
+
+getImports :: Program -> [Import]
+getImports prg = prg.imports
 
 type GetNameTypes =
   Haskell.NameP

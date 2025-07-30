@@ -22,7 +22,7 @@ getScope availPrgs exportIdx n !scopeStack =
           -- Add top level and imported bindings
           let (_, prg) = Hir.parseHaskell haskellNode
               availableNames = getGlobalAvalibleDecls availPrgs exportIdx prg
-              modScope = globalDeclsToScope availableNames prg.imports
+              modScope = globalDeclsToScope availableNames (Hir.getImports prg)
            in modScope : scopeStack
         -- import lists do not use the global program scope
         Just (AST.Inj @(AST.ImportP) _importNode) ->

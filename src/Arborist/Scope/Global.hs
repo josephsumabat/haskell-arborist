@@ -143,13 +143,14 @@ getExportedDecls' prgIndex exportIndex inProgress modName
               reExportedAliasesSet = Set.fromList reExportedAliases
               reExportedModsSet =
                 modsFromAliases aliasModMap reExportedAliases
+              imports = Hir.getImports prg
               requiredImports =
                 if null transitiveReexportNames
                   then
                     filter
                       (isExportedImport reExportedModsSet)
-                      prg.imports
-                  else prg.imports
+                      imports
+                  else imports
 
               (allImportedNames, updatedExportIdx) =
                 getManyImportDecls' prgIndex exportIndex inProgress' requiredImports
@@ -199,7 +200,8 @@ getGlobalAvalibleDecls availPrgs exportIdx thisPrg =
              in exportToInfo thisModImportInfo False <$> getDeclaredNames modName thisPrg
         )
         thisPrg.mod
-    (importedNames, _) = getManyImportDecls availPrgs exportIdx thisPrg.imports
+    imports = Hir.getImports thisPrg
+    (importedNames, _) = getManyImportDecls availPrgs exportIdx imports
    in
     declaredNames <> importedNames
 
