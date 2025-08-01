@@ -2,7 +2,7 @@ module Arborist.Scope.Global (
   getExportedDecls,
   getImportDecls,
   globalDeclsToScope,
-  getGlobalAvalibleDecls,
+  getGlobalAvailableDecls,
   ExportIndex,
   declToExportedName,
   exportToInfo,
@@ -189,8 +189,8 @@ getDeclaredNames mod prg =
   fmap (declToExportedName mod) prg.decls
 
 -- this brings all possible decls into scope including hidden ones (but tagged), add tag
-getGlobalAvalibleDecls :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
-getGlobalAvalibleDecls availPrgs exportIdx thisPrg =
+getGlobalAvailableDecls :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
+getGlobalAvailableDecls availPrgs exportIdx thisPrg =
   let
     declaredNames =
       maybe

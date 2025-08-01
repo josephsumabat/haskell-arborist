@@ -13,6 +13,7 @@ import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
+import qualified Control.Monad as Monad
 
 -- | An intermediate representation of a declaration annotated
 data GlblDeclInfo = GlblDeclInfo

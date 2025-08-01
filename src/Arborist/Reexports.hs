@@ -3,13 +3,16 @@ module Arborist.Reexports (
   replaceImport,
 ) where
 
+import Arborist.Scope
 import Arborist.Rewrite
+import Arborist.Scope.Global
+import Arborist.Scope.Types
 import Arborist.Files
 import Hir.Render.Import qualified as Render
 import Arborist.ProgramIndex
 import Arborist.Rewrite (rewriteNode)
 import Data.HashMap.Lazy qualified as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, isJust, fromJust)
 import Data.Set qualified as Set
 import Hir.Types qualified as Hir
 import Hir.Types qualified as HirImport (Import (..))
@@ -24,6 +27,11 @@ import Control.Monad
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
 import HaskellAnalyzer
+import Text.Pretty.Simple
+import Debug.Trace
+import qualified Data.Text.Lazy as TL
+import qualified Control.Monad as Monad
+import Control.Error (catMaybes)
 
 -- | Find all modules in the program index that import the given module.
 -- 
@@ -53,14 +61,22 @@ runReplaceReexports :: IO ()
 runReplaceReexports = do
     let targetReexporting = parseModuleTextFromText "TestImport"
     let reexport = parseModuleTextFromText "TestImport.Import.NoFoundation"
-    let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
+    let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test", "../mercury-web-backend/local-packages/a-mercury-prelude/src"]
     srcFiles <- getAllHsFiles onlySrc
     srcPrgs <- lazyGetPrgs srcFiles
     modFileMap <- buildModuleFileMap onlySrc
+    let reexportPrg = fromJust (Map.lookup reexport srcPrgs)
     let importingModules = findImportingModules srcPrgs targetReexporting
-    let edits = replaceReexporters srcPrgs importingModules targetReexporting [reexport]
-        editsWithPaths = mapMaybe (\(mod, e) -> ((\file -> (file, e)) <$> Map.lookup mod modFileMap)) edits
     putStrLn $ "Modules importing TestImport" ++ show importingModules
+    let glblAvail = getGlobalAvailableDecls srcPrgs Map.empty (fromJust $ Map.lookup reexport srcPrgs)
+    let reexportScope = globalDeclsToScope glblAvail reexportPrg.imports
+    let reexportIdentifiers =
+          Set.fromList $ Map.keys reexportScope.glblVarInfo
+          <> Map.keys reexportScope.glblNameInfo
+          <> Map.keys reexportScope.glblConstructorInfo
+    putStrLn $ TL.unpack . pShowNoColor $ globalDeclsToScope glblAvail reexportPrg.imports
+    let edits = replaceReexporters srcPrgs importingModules targetReexporting [reexport] reexportIdentifiers
+        editsWithPaths = mapMaybe (\(mod, e) -> ((\file -> (file, e)) <$> Map.lookup mod modFileMap)) edits
     forM_ editsWithPaths $ \(path, edits) -> writeMultipleEdits path edits
       where
   lazyGetPrgs :: [FilePath] -> IO ProgramIndex
@@ -76,26 +92,45 @@ runReplaceReexports = do
     fileContents <- fmap TE.decodeUtf8 . BS.readFile $ file
     pure $ snd (parsePrg fileContents) -- Run `test` function
 
-replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> [(Hir.ModuleText, [Edit])]
-replaceReexporters prgIndex importingMods reexportingMod reexportedMods =
+replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [(Hir.ModuleText, [Edit])]
+replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexportIdentifiers =
   mapMaybe (\importingMod ->
     let mPrg = Map.lookup importingMod prgIndex in
-        (\prg -> (importingMod, replaceModImports prg reexportingMod reexportedMods)) <$> mPrg
+        (\prg -> (importingMod, replaceModImports prg reexportingMod reexportedMods reexportIdentifiers)) <$> mPrg
     )  importingMods
 
-replaceModImports :: Hir.Program -> Hir.ModuleText -> [Hir.ModuleText] -> [Edit]
-replaceModImports prg targetMod modsToAdd =
+replaceModImports :: Hir.Program -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [Edit]
+replaceModImports prg targetMod modsToAdd reexportIdentifiers =
   let imports = prg.imports
       foundImports = filter (\imp -> imp.mod == targetMod) imports
   in 
-    (\foundImport -> replaceImport foundImport modsToAdd) <$> foundImports
+    (\foundImport -> replaceImport foundImport modsToAdd reexportIdentifiers) <$> foundImports
 
-toImport :: Hir.Import -> Hir.ModuleText -> Hir.Import
-toImport orig newMod = 
-        orig { HirImport.mod = newMod }
+toNewImport :: Render.Import -> Hir.ModuleText -> Set.Set Text.Text -> Maybe Render.Import
+toNewImport orig newMod reexportIdentifiers = 
+  let alias = orig.alias 
+      importList = filter (\importItem -> Set.member importItem.name.nameText reexportIdentifiers) <$> orig.importList
+      hiding =
+        case importList of
+          Nothing -> False
+          Just [] -> False
+          Just _xs -> orig.hiding
+      qualified = orig.qualified
 
-replaceImport :: Hir.Import -> [Hir.ModuleText] -> Edit
-replaceImport imp mods = 
+   in
+         Just $ Render.Import
+          {
+            mod = newMod
+          , qualified
+          , alias
+          , hiding = orig.hiding
+          , importList = orig.importList
+          }
+      
+
+replaceImport :: Hir.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
+replaceImport imp mods reexportIdentifiers = 
   let dynNode = imp.dynNode
-      newText = Text.unlines $ Render.renderImport <$> Render.fromHirImport imp:((\mod -> Render.fromHirImport (toImport imp mod)) <$> mods)
+      renderImp = Render.fromHirImport imp
+      newText = Text.unlines $ Render.renderImport <$> (catMaybes $ Just renderImp:((\mod -> (toNewImport renderImp mod reexportIdentifiers)) <$> mods))
   in rewriteNode dynNode newText 
