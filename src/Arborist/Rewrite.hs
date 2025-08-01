@@ -2,18 +2,18 @@
 
 module Arborist.Rewrite (rewriteNode, replaceRange, applyEdit, writeEdit, writeMultipleEdits, adjustEdit, applyMultipleEdits) where
 
+import AST (DynNode)
+import AST qualified
+import Data.Change (Change (..))
+import Data.Edit
+import Data.Edit qualified as Edit
 import Data.LineCol
 import Data.LineColRange
 import Data.Pos
+import Data.Range (Range (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Data.Edit
-import Data.Edit qualified as Edit
-import Data.Change (Change (..))
-import Data.Range (Range (..))
-import AST (DynNode)
-import AST qualified
 
 import Data.List (sortOn)
 
@@ -41,7 +41,7 @@ replaceRange (LineColRange (LineCol startLine startCol) (LineCol endLine endCol)
 rewriteNode :: DynNode -> Text -> Edit
 rewriteNode dynNode newText =
   let range = dynNode.nodeRange
-  in  replace range newText
+   in replace range newText
 
 -- | Apply an edit to text content
 applyEdit :: Edit -> Text -> Text
@@ -77,7 +77,7 @@ writeMultipleEdits filePath edits = do
 
 -- | Apply multiple edits to text content, adjusting positions for each edit
 applyMultipleEdits :: [Edit] -> Text -> Text
-applyMultipleEdits edits originalText = 
+applyMultipleEdits edits originalText =
   let (finalText, _) = foldl applyEditWithAdjustment (originalText, []) edits
    in finalText
 
@@ -108,7 +108,7 @@ applyEditWithAdjustment (text, adjustments) edit =
 
 -- | Adjust a position based on previous edits
 adjustPosition :: Pos -> [(Pos, Int)] -> Int
-adjustPosition pos adjustments = 
+adjustPosition pos adjustments =
   let relevantAdjustments = filter (\(adjustPos, _) -> adjustPos.pos <= pos.pos) adjustments
       totalShift = sum [shift | (_, shift) <- relevantAdjustments]
    in pos.pos + totalShift
@@ -116,14 +116,13 @@ adjustPosition pos adjustments =
 -- | Create an adjusted edit based on previous position adjustments
 -- This is useful when you need to create new edits after previous ones have been applied
 adjustEdit :: Edit -> [(Pos, Int)] -> Edit
-adjustEdit edit adjustments = 
+adjustEdit edit adjustments =
   let changes = Edit.getChanges edit
       adjustedChanges = map (adjustChange adjustments) changes
    in Edit.changesToEdit adjustedChanges
  where
   adjustChange :: [(Pos, Int)] -> Change -> Change
   adjustChange adjustments change =
-    let adjustedStart = change.delete.start { pos = adjustPosition change.delete.start adjustments }
-        adjustedEnd = change.delete.end { pos = adjustPosition change.delete.end adjustments }
-     in change { delete = change.delete { start = adjustedStart, end = adjustedEnd } }
-
+    let adjustedStart = change.delete.start {pos = adjustPosition change.delete.start adjustments}
+        adjustedEnd = change.delete.end {pos = adjustPosition change.delete.end adjustments}
+     in change {delete = change.delete {start = adjustedStart, end = adjustedEnd}}

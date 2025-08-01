@@ -4,6 +4,7 @@ import AST
 import AST.Haskell qualified as AST
 import Arborist.Haddock
 import Control.Applicative
+import Control.Monad qualified as Monad
 import Data.HashMap.Lazy qualified as Map
 import Data.Hashable
 import Data.LineColRange
@@ -13,7 +14,6 @@ import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import qualified Control.Monad as Monad
 
 -- | An intermediate representation of a declaration annotated
 data GlblDeclInfo = GlblDeclInfo
@@ -176,6 +176,7 @@ resolvedLclVarToLoc resolvedVar =
 -- | Var infos for a name indexed by module
 -- TODO: change val to [GlblVarInfo]?
 type GlblVarInfoMap = Map.HashMap T.Text ImportVarInfoMap
+
 type ImportVarInfoMap = Map.HashMap ImportInfo [GlblVarInfo]
 type ImportNameInfoMap = Map.HashMap ImportInfo [GlblNameInfo]
 type GlblNameInfoMap = Map.HashMap T.Text ImportNameInfoMap

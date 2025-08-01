@@ -1,15 +1,15 @@
 module Arborist.TreeSitter (parseExpectedNode) where
 
 import AST qualified
+import Data.Pos qualified as Pos
 import Data.Text qualified as Text
-import qualified TreeSitter.Haskell as TS
-import qualified TreeSitter.Api as TS
-import qualified Data.Pos as Pos
+import TreeSitter.Api qualified as TS
+import TreeSitter.Haskell qualified as TS
 
-data SingleNodeParseFailure =
-  ExpectedNodeNotFound
-    | RangeNotMatched AST.DynNode Text.Text
-    deriving (Show, Eq)
+data SingleNodeParseFailure
+  = ExpectedNodeNotFound
+  | RangeNotMatched AST.DynNode Text.Text
+  deriving (Show, Eq)
 
 -- | Helper to parse a single node of text Examples:
 --  `parseSingleNode @VariableP "myVariable"` - will result in a valid VariableP node
@@ -20,15 +20,14 @@ parseExpectedNode :: forall a. (AST.HasDynNode a, AST.Cast a) => Text.Text -> Ei
 parseExpectedNode t =
   let satisfyingNode =
         AST.getDeepestSatisfying (AST.cast @a) (TS.parse TS.tree_sitter_haskell t)
-        in
-    case satisfyingNode of
-      Nothing -> Left ExpectedNodeNotFound
-      Just res -> 
-        let dynNode = AST.getDynNode res
-            (start,end) = (dynNode.nodeRange.start, dynNode.nodeRange.end) in
-            case (start == Pos.mkPos 0, end == (Pos.mkPos $ Text.length t)) of
-              (True, True) -> Right res
-              _ -> Left $ RangeNotMatched dynNode t
+   in case satisfyingNode of
+        Nothing -> Left ExpectedNodeNotFound
+        Just res ->
+          let dynNode = AST.getDynNode res
+              (start, end) = (dynNode.nodeRange.start, dynNode.nodeRange.end)
+           in case (start == Pos.mkPos 0, end == (Pos.mkPos $ Text.length t)) of
+                (True, True) -> Right res
+                _ -> Left $ RangeNotMatched dynNode t
 
 renderFailure :: SingleNodeParseFailure -> Text.Text
 renderFailure s =

@@ -8,13 +8,14 @@ module Arborist.Renamer (
   resolvedConstructorLocs,
   ResolvedVariable (..),
   ResolvedName (..),
-  ResolvedConstructor (..), 
+  ResolvedConstructor (..),
   RenamePhase,
-  Resolveable
+  Resolveable,
 )
 where
 
 import AST qualified
+import AST.Extension
 import AST.Haskell qualified as AST
 import Arborist.ProgramIndex
 import Arborist.Scope
@@ -32,7 +33,6 @@ import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as Hir
-import AST.Extension
 
 data RenamePhase
 
@@ -63,9 +63,9 @@ resolvedNameLocs :: ResolvedName -> [(Hir.ModuleText, LineColRange)]
 resolvedNameLocs resolvedName =
   case resolvedName of
     ResolvedName nameInfo _ -> [(nameInfo.originatingMod, nameInfo.loc)]
-    AmbiguousName names ->  NE.toList $ (\name -> (name.originatingMod, name.loc)) <$> names
+    AmbiguousName names -> NE.toList $ (\name -> (name.originatingMod, name.loc)) <$> names
     NoNameFound -> []
-  
+
 resolvedConstructorLocs :: ResolvedConstructor -> [(Hir.ModuleText, LineColRange)]
 resolvedConstructorLocs resolvedCon =
   case resolvedCon of
@@ -173,8 +173,8 @@ renamePrg availPrgs exportIdx prg =
             result = AST.getDynNode $ AST.modifyVariableExt @RenamePhase node (\_ -> resolvedVar)
          in result
       Just (AST.Inj @(AST.ConstructorP) conNode) ->
-          let resolvedCon = resolveConstructor renamerEnv conNode
-          in AST.getDynNode $ AST.modifyConstructorExt @RenamePhase conNode (\_ -> resolvedCon)
+        let resolvedCon = resolveConstructor renamerEnv conNode
+         in AST.getDynNode $ AST.modifyConstructorExt @RenamePhase conNode (\_ -> resolvedCon)
       Just _ -> n
       Nothing -> n
 
@@ -199,7 +199,7 @@ renamePrg availPrgs exportIdx prg =
 
   -- find list of possible mappings
   getValidGlobalNameInfos :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> [GlblNameInfo]
-  getValidGlobalNameInfos renamerEnv currScope name qualifier = 
+  getValidGlobalNameInfos renamerEnv currScope name qualifier =
     case Map.lookup name (currScope.glblNameInfo) of
       Nothing -> []
       Just impNameMap ->
@@ -207,15 +207,17 @@ renamePrg availPrgs exportIdx prg =
           Nothing -> filter (\nameInfo -> not nameInfo.requiresQualifier) $ List.foldl' collectUnqualified [] (Map.toList impNameMap)
           Just q ->
             let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
-             in  filter (\nameInfo -> let aliasSet = NESet.map (.namespace) nameInfo.importedFrom
-                                        in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
-                        )
+             in filter
+                  ( \nameInfo ->
+                      let aliasSet = NESet.map (.namespace) nameInfo.importedFrom
+                       in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
+                  )
                   $ List.foldl' collectQualified [] (Map.toList impNameMap)
-        where 
-          collectQualified acc (_impInfo, nameInfos) = nameInfos ++ acc
-          collectUnqualified acc (impInfo, nameInfos)
-            | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = nameInfos ++ acc
-            | otherwise = acc
+       where
+        collectQualified acc (_impInfo, nameInfos) = nameInfos ++ acc
+        collectUnqualified acc (impInfo, nameInfos)
+          | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = nameInfos ++ acc
+          | otherwise = acc
 
   -- Lookup a var name
   resolveVar :: RenamerEnv -> AST.VariableP -> ResolvedVariable
@@ -303,12 +305,11 @@ renamePrg availPrgs exportIdx prg =
         case conP.dynNode.nodeParent >>= AST.cast @AST.QualifiedP >>= (eitherToMaybe . AST.unwrap) of
           Just qualU -> getGlobalResolvedConstructors renamerEnv currScope conP.dynNode.nodeText (Just qualU.module')
           Nothing -> getGlobalResolvedConstructors renamerEnv currScope conP.dynNode.nodeText Nothing
-  
 
   getGlobalResolvedConstructors :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> ResolvedConstructor
   getGlobalResolvedConstructors renamerEnv currScope conName qualifier =
     let conInfos = getValidGlobalConstructorInfos renamerEnv currScope conName qualifier
-    in case conInfos of
+     in case conInfos of
           [] -> NoConstructorFound
           [x] -> ResolvedConstructor x
           (x : xs) -> AmbiguousConstructor (x NE.:| xs)
@@ -319,16 +320,18 @@ renamePrg availPrgs exportIdx prg =
       Nothing -> []
       Just impConMap ->
         case qualifier of
-          Nothing -> 
+          Nothing ->
             filter (\conInfo -> not conInfo.requiresQualifier) $ List.foldl' collectUnqualified [] (Map.toList impConMap)
           Just q ->
             let mAliasName = (eitherToMaybe . Hir.parseModuleText) q
-            in filter (\conInfo ->  let aliasSet = NESet.map (.namespace) conInfo.importedFrom
-                                    in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
-                      )
-                $ List.foldl' collectQualified [] (Map.toList impConMap)
-    where
-      collectQualified acc (_impInfo, conInfos) = conInfos ++ acc
-      collectUnqualified acc (impInfo, conInfos)
-        | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = conInfos ++ acc
-        | otherwise = acc
+             in filter
+                  ( \conInfo ->
+                      let aliasSet = NESet.map (.namespace) conInfo.importedFrom
+                       in maybe False (\alias -> alias `NESet.member` aliasSet) mAliasName
+                  )
+                  $ List.foldl' collectQualified [] (Map.toList impConMap)
+   where
+    collectQualified acc (_impInfo, conInfos) = conInfos ++ acc
+    collectUnqualified acc (impInfo, conInfos)
+      | impInfo.namespace `Set.member` renamerEnv.unqualifiedImports = conInfos ++ acc
+      | otherwise = acc

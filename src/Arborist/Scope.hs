@@ -65,7 +65,8 @@ getScope availPrgs exportIdx n !scopeStack =
                 Just localBinds ->
                   addLocalLetBinds
                     currScope
-                    (Hir.parseLocalBinds localBinds) : scopeStack
+                    (Hir.parseLocalBinds localBinds)
+                    : scopeStack
         -- let binding within do
         Just (AST.Inj @(AST.LetP) letNode) ->
           let mLocalBinds = (eitherToMaybe $ AST.unwrap letNode) >>= (.binds)

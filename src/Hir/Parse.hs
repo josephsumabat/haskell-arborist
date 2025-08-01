@@ -22,11 +22,11 @@ import TreeSitter.Api
 
 parsePrefix :: H.PrefixP -> Maybe Name
 parsePrefix p =
-        let name = (AST.unwrapMaybe p >>= (.name)) in
-        case name of
-          Just (AST.Inj @H.ConstructorP c) -> Just $ parseName $ AST.Inj c
-          Just (AST.Inj @H.PrefixIdP p)  -> eitherToMaybe . parseNamePrefix $ AST.Inj p
-          _ -> Nothing
+  let name = (AST.unwrapMaybe p >>= (.name))
+   in case name of
+        Just (AST.Inj @H.ConstructorP c) -> Just $ parseName $ AST.Inj c
+        Just (AST.Inj @H.PrefixIdP p) -> eitherToMaybe . parseNamePrefix $ AST.Inj p
+        _ -> Nothing
 
 parseName :: ParseNameTypes -> Name
 parseName ast = case ast of
@@ -330,8 +330,8 @@ parseBind decl = do
       bind <- AST.unwrap bindNode
       let name = fmap IsName . parseNamePrefix . AST.subset <$> bind.name
           pat =
-            Right . IsPat . parsePattern <$>
-              (AST.cast @H.PatternP =<< (AST.getDynNode <$> bind.pattern'))
+            Right . IsPat . parsePattern
+              <$> (AST.cast @H.PatternP =<< (AST.getDynNode <$> bind.pattern'))
           nameOrPat = name <|> pat
       case nameOrPat of
         Just (Right (IsName name)) ->
@@ -354,8 +354,7 @@ parseBind decl = do
 
 patToBinds :: Pattern -> (H.BindP :+ (H.FunctionP :+ AST.Nil)) -> [BindDecl]
 patToBinds pat parent =
-  (\v -> BindDecl { name = v.name, node = parent }) <$> pat.patVars
-  
+  (\v -> BindDecl {name = v.name, node = parent}) <$> pat.patVars
 
 parseClass :: H.ClassP -> AST.Err Decl
 parseClass c = do

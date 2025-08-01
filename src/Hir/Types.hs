@@ -13,12 +13,10 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 
-data WithNode node a =
-  WithNode
-    {
-      val :: a
-    , node :: node
-    }
+data WithNode node a = WithNode
+  { val :: a
+  , node :: node
+  }
   deriving (Show, Eq)
 
 data NameSpace
@@ -125,8 +123,6 @@ data ImportName = ImportName
   }
   deriving (Show, Eq)
 
-
-
 data Import = Import
   { mod :: ModuleText
   , alias :: Maybe ModuleText
@@ -169,9 +165,9 @@ data BindDecl = BindDecl
   }
   deriving (Show, Eq)
 
-data NameOrPat =
-  IsName Name
-    | IsPat Pattern
+data NameOrPat
+  = IsName Name
+  | IsPat Pattern
   deriving (Show, Eq)
 
 data SigDecl = SigDecl

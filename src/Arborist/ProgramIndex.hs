@@ -103,23 +103,23 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
 
       -- Determine dependencies
       let (_reexportedMods, requiredModules) =
-            let imports = getImports prg in
-            case prg.exports of
-              Nothing -> ([], (.mod) <$> imports)
-              Just exports ->
-                let
-                  reExportedAliases = (.mod) <$> exportItemMods exports
-                  aliasModMap = getAliasModMap prg
-                  reExportedMods = modsFromAliases aliasModMap reExportedAliases
-                  allImportMods = (.mod) <$> imports
-                  exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) imports
-                  transitiveNames = getTransitiveReExportNames prg exports
-                  req =
-                    if Set.null transitiveNames
-                      then exportedMods
-                      else allImportMods
-                 in
-                  (exportedMods, req)
+            let imports = getImports prg
+             in case prg.exports of
+                  Nothing -> ([], (.mod) <$> imports)
+                  Just exports ->
+                    let
+                      reExportedAliases = (.mod) <$> exportItemMods exports
+                      aliasModMap = getAliasModMap prg
+                      reExportedMods = modsFromAliases aliasModMap reExportedAliases
+                      allImportMods = (.mod) <$> imports
+                      exportedMods = (.mod) <$> filter (isExportedImport reExportedMods) imports
+                      transitiveNames = getTransitiveReExportNames prg exports
+                      req =
+                        if Set.null transitiveNames
+                          then exportedMods
+                          else allImportMods
+                     in
+                      (exportedMods, req)
 
       let requiredFilesWithSrc = getModFiles modFileMap requiredModules
 

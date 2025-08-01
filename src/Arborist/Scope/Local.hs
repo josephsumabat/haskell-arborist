@@ -118,11 +118,15 @@ getNewLocalDecl existing decl =
   -- can have multiple names bound
   tryMergeBind :: Hir.BindDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeBind b [] =
-    (Just
-      (LocalDecl
-        {sig = Nothing, binds = [b]
-        , loc = (AST.getDynNode b.name.node).nodeLineColRange
-        }), [])
+    ( Just
+        ( LocalDecl
+            { sig = Nothing
+            , binds = [b]
+            , loc = (AST.getDynNode b.name.node).nodeLineColRange
+            }
+        )
+    , []
+    )
   tryMergeBind b (v : vs) =
     case v.binds of
       [] ->

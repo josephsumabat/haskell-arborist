@@ -12,23 +12,23 @@ where
 
 import AST
 import AST.Haskell qualified as AST
+import AST.Haskell qualified as H
 import Arborist.Exports
 import Arborist.ProgramIndex
 import Arborist.Scope.Types
+import Data.Either.Extra (eitherToMaybe)
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe
 import Data.Set qualified as Set
 import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
 import GHC.Stack
 import Hir
+import Hir.Parse
 import Hir.Types (Decl, ModuleText)
 import Hir.Types qualified as Hir
-import Data.List.NonEmpty qualified as NE
-import AST.Haskell qualified as H
-import Data.Either.Extra (eitherToMaybe)
-import Hir.Parse
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
@@ -94,9 +94,9 @@ getImportDecls' prgIndex exportIndex inProgress thisImport =
       mod = thisImport.mod
       alias = fromMaybe thisImport.mod thisImport.alias
       (exportedNames, updatedExportIndex) = getExportedDecls' prgIndex exportIndex inProgress mod
-      importInfo = ImportInfo { mod = mod, namespace = alias }
+      importInfo = ImportInfo {mod = mod, namespace = alias}
       glblNameInfo = exportToInfo importInfo qualified <$> exportedNames
-    in (glblNameInfo, updatedExportIndex)
+   in (glblNameInfo, updatedExportIndex)
 
 getManyImportDecls' ::
   (HasCallStack) =>
@@ -231,32 +231,32 @@ declToNameInfo d =
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
 globalDeclsToScope :: [GlblDeclInfo] -> [Hir.Import] -> Scope
-globalDeclsToScope availDecl imports = 
+globalDeclsToScope availDecl imports =
   let filteredDecl = filterHiddenItems availDecl imports
-  in List.foldl' indexDeclInfo emptyScope filteredDecl
+   in List.foldl' indexDeclInfo emptyScope filteredDecl
  where
   filterHiddenItems :: [GlblDeclInfo] -> [Hir.Import] -> [GlblDeclInfo]
-  filterHiddenItems decls imps = 
+  filterHiddenItems decls imps =
     filter (not . isHidden imps) decls
-    
+
   isHidden :: [Hir.Import] -> GlblDeclInfo -> Bool
-  isHidden imps declInfo = 
+  isHidden imps declInfo =
     case findMatchingImport imps declInfo of
       Nothing -> False
       Just imp -> shouldBeHidden imp declInfo
-      
+
   findMatchingImport :: [Hir.Import] -> GlblDeclInfo -> Maybe Hir.Import
   findMatchingImport imps declInfo = List.find (\imp -> imp.mod == declInfo.importedFrom.mod) imps
-    
-  shouldBeHidden :: Hir.Import -> GlblDeclInfo -> Bool  
+
+  shouldBeHidden :: Hir.Import -> GlblDeclInfo -> Bool
   shouldBeHidden imp declInfo =
     case imp.importList of
       Nothing -> False
       Just items ->
         let importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> items
             isInList = Set.member declInfo.name importNames
-        in if imp.hiding then isInList else not isInList
-        
+         in if imp.hiding then isInList else not isInList
+
   indexDeclInfo :: Scope -> GlblDeclInfo -> Scope
   indexDeclInfo scope availDecl =
     let declKey = availDecl.name
@@ -290,19 +290,17 @@ globalDeclsToScope availDecl imports =
                 newImportMap = Map.insert impInfo (existing ++ [nameInfo]) importMap
              in Map.insert key newImportMap nameMap
 
-
         constructors = case availDecl.decl of
           Hir.DeclData dataDecl -> extractDataConstructors dataDecl availDecl
           Hir.DeclNewtype newtypeDecl -> extractNewtypeConstructor newtypeDecl availDecl
           _ -> []
 
         updatedConstructorMap = addConstructorsToMap constructors scope.glblConstructorInfo
-
-      in scope { glblVarInfo = updatedVarMap
-                , glblNameInfo = updatedNameMap
-                , glblConstructorInfo = updatedConstructorMap
-                }
-
+     in scope
+          { glblVarInfo = updatedVarMap
+          , glblNameInfo = updatedNameMap
+          , glblConstructorInfo = updatedConstructorMap
+          }
 
   equalSig :: Hir.SigDecl -> Hir.SigDecl -> Bool
   equalSig s1 s2 =
@@ -394,38 +392,38 @@ globalDeclsToScope availDecl imports =
         importMap = Map.findWithDefault Map.empty key currentMap
         existing = Map.findWithDefault [] impInfo importMap
         newImportMap = Map.insert impInfo (existing ++ [constructor]) importMap
-    in Map.insert key newImportMap currentMap
+     in Map.insert key newImportMap currentMap
 
- -- find all constructors
+  -- find all constructors
 
   extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractDataConstructors decl parentInfo =
-    let dataTypeNode = decl.node in
-        case unwrap dataTypeNode of
+    let dataTypeNode = decl.node
+     in case unwrap dataTypeNode of
           Left _ -> []
-          Right H.DataTypeU { constructors = mCons } ->
-              case mCons of
+          Right H.DataTypeU {constructors = mCons} ->
+            case mCons of
               -- regular DataConstructors branch
-                Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
-                    case unwrap dataConstructor of
-                      Left _ -> []
-                      Right H.DataConstructorsU { constructor = nes } ->
-                        concatMap
-                          (\dataCon ->
-                                let mName = parseDataConName dataCon in
-                                maybeToList $ makeConstructorInfo parentInfo dataCon.dynNode <$> mName
-                          )
-                          (NE.toList nes)
-                  -- TODO: the GADT branch
-                Just (AST.Inj @H.GadtConstructorsP _gadtConstructor) -> []
-                _ -> []
+              Just (AST.Inj @(H.DataConstructorsP) dataConstructor) ->
+                case unwrap dataConstructor of
+                  Left _ -> []
+                  Right H.DataConstructorsU {constructor = nes} ->
+                    concatMap
+                      ( \dataCon ->
+                          let mName = parseDataConName dataCon
+                           in maybeToList $ makeConstructorInfo parentInfo dataCon.dynNode <$> mName
+                      )
+                      (NE.toList nes)
+              -- TODO: the GADT branch
+              Just (AST.Inj @H.GadtConstructorsP _gadtConstructor) -> []
+              _ -> []
 
   extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractNewtypeConstructor decl parentInfo =
     case unwrap (decl.node) of
-      Right H.NewtypeU { dynNode = constructorDyn, constructor = constructorNode } ->
-        let mName = parseNewtypeConName =<< constructorNode in
-        maybeToList $ makeConstructorInfo parentInfo constructorDyn <$> mName
+      Right H.NewtypeU {dynNode = constructorDyn, constructor = constructorNode} ->
+        let mName = parseNewtypeConName =<< constructorNode
+         in maybeToList $ makeConstructorInfo parentInfo constructorDyn <$> mName
       _ -> []
 
   parseDataConName :: AST.DataConstructorP -> Maybe Hir.Name
@@ -457,4 +455,3 @@ globalDeclsToScope availDecl imports =
       , parentType = parentInfo
       , node = conNode
       }
-

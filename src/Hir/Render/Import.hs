@@ -1,8 +1,8 @@
-module Hir.Render.Import (renderImport, Import(..), ImportItem(..), ImportChildren(..), Name(..), fromHirImport) where
+module Hir.Render.Import (renderImport, Import (..), ImportItem (..), ImportChildren (..), Name (..), fromHirImport) where
 
-import Hir.Types qualified as Hir
-import Data.Text qualified as Text
 import AST qualified
+import Data.Text qualified as Text
+import Hir.Types qualified as Hir
 
 -- | Import without DynNode fields
 data Import = Import
@@ -38,21 +38,23 @@ data Name = Name
 
 -- | Convert Hir.Import to Import
 fromHirImport :: Hir.Import -> Import
-fromHirImport imp = Import
-  { mod = imp.mod
-  , alias = imp.alias
-  , qualified = imp.qualified
-  , hiding = imp.hiding
-  , importList = fmap (map fromHirImportItem) imp.importList
-  }
+fromHirImport imp =
+  Import
+    { mod = imp.mod
+    , alias = imp.alias
+    , qualified = imp.qualified
+    , hiding = imp.hiding
+    , importList = fmap (map fromHirImportItem) imp.importList
+    }
 
 -- | Convert Hir.ImportItem to ImportItem
 fromHirImportItem :: Hir.ImportItem -> ImportItem
-fromHirImportItem item = ImportItem
-  { namespace = item.namespace
-  , name = fromHirName item.name
-  , children = map fromHirImportChildren item.children
-  }
+fromHirImportItem item =
+  ImportItem
+    { namespace = item.namespace
+    , name = fromHirName item.name
+    , children = map fromHirImportChildren item.children
+    }
 
 -- | Convert Hir.ImportChildren to ImportChildren
 fromHirImportChildren :: Hir.ImportChildren -> ImportChildren
@@ -62,11 +64,12 @@ fromHirImportChildren child = case child of
 
 -- | Convert Hir.Name to Name
 fromHirName :: Hir.Name -> Name
-fromHirName name = Name
-  { nameText = Hir.nameText name
-  , isOperator = name.isOperator
-  , isConstructor = name.isConstructor
-  }
+fromHirName name =
+  Name
+    { nameText = Hir.nameText name
+    , isOperator = name.isOperator
+    , isConstructor = name.isConstructor
+    }
 
 renderImport :: Import -> Text.Text
 renderImport imp =
@@ -79,7 +82,7 @@ renderImport imp =
       withImportList = case imp.importList of
         Just items -> withHiding <> " (" <> renderImportItems items <> ")"
         Nothing -> withHiding
-  in withImportList
+   in withImportList
 
 -- | Render a list of import items
 renderImportItems :: [ImportItem] -> Text.Text
@@ -89,13 +92,14 @@ renderImportItems = Text.intercalate ", " . map renderImportItem
 renderImportItem :: ImportItem -> Text.Text
 renderImportItem item =
   let nameText = item.name.nameText
-      wrappedName = if item.name.isOperator 
-                   then "(" <> nameText <> ")"
-                   else nameText
+      wrappedName =
+        if item.name.isOperator
+          then "(" <> nameText <> ")"
+          else nameText
       withChildren = case item.children of
         [] -> wrappedName
         children -> wrappedName <> " (" <> renderImportChildren children <> ")"
-  in withChildren
+   in withChildren
 
 -- | Render import children
 renderImportChildren :: [ImportChildren] -> Text.Text
@@ -107,7 +111,8 @@ renderImportChild child = case child of
   ImportAllChildren -> ".."
   ImportChild namespace name ->
     let nameText = name.nameText
-        wrappedName = if name.isOperator 
-                     then "(" <> nameText <> ")"
-                     else nameText
-    in wrappedName
+        wrappedName =
+          if name.isOperator
+            then "(" <> nameText <> ")"
+            else nameText
+     in wrappedName
