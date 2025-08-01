@@ -5,6 +5,7 @@ import Data.Pos qualified as Pos
 import Data.Text qualified as Text
 import TreeSitter.Api qualified as TS
 import TreeSitter.Haskell qualified as TS
+import Control.Applicative
 
 data SingleNodeParseFailure
   = ExpectedNodeNotFound
@@ -19,7 +20,7 @@ data SingleNodeParseFailure
 parseExpectedNode :: forall a. (AST.HasDynNode a, AST.Cast a) => Text.Text -> Either SingleNodeParseFailure a
 parseExpectedNode t =
   let satisfyingNode =
-        AST.getDeepestSatisfying (AST.cast @a) (TS.parse TS.tree_sitter_haskell t)
+        getFirstSatisfying (AST.cast @a) (TS.parse TS.tree_sitter_haskell t)
    in case satisfyingNode of
         Nothing -> Left ExpectedNodeNotFound
         Just res ->
@@ -34,3 +35,9 @@ renderFailure s =
   case s of
     RangeNotMatched dynNode _ -> "Statement range must match the entire input. node had range " <> (Text.pack . show $ dynNode.nodeRange)
     ExpectedNodeNotFound -> "Failed to find expected node"
+
+getFirstSatisfying :: (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
+getFirstSatisfying f n = go n
+ where
+  go n = 
+      f n <|> asum (go <$> (TS.nodeChildren n))
