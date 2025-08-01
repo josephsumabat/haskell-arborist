@@ -272,8 +272,3 @@ spec = describe "renderImport" $ do
             , importList = Just [importItem]
             }
       Render.renderImport imp `shouldBe` "import Data.Text ((++))"
-
-  describe "real parsed imports" $ do
-    it "renders real import from test data" $ do
-      -- This test uses real parsed data to test the full functionality
-      pendingWith "Need to implement with real parsed test data" 

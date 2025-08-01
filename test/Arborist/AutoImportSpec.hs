@@ -29,7 +29,7 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport testDecl)
+              changes = getChanges (addDeclToImportEdit hirImport testDecl)
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "import Data.List (map, sort)"
             _ -> expectationFailure $ show changes
@@ -48,9 +48,9 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport classDecl)
+              changes = getChanges (addDeclToImportEdit hirImport classDecl)
           case changes of
-            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyClass(..))"
+            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyClass (..))"
             _ -> expectationFailure $ show changes
         Nothing -> expectationFailure "No import found"
 
@@ -67,9 +67,9 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport newtypeDecl)
+              changes = getChanges (addDeclToImportEdit hirImport newtypeDecl)
           case changes of
-            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyNewtype(..))"
+            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyNewtype (..))"
             _ -> expectationFailure $ show changes
         Nothing -> expectationFailure "No import found"
 
@@ -86,9 +86,9 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport dataDecl)
+              changes = getChanges (addDeclToImportEdit hirImport dataDecl)
           case changes of
-            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyData(..))"
+            [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (MyData (..))"
             _ -> expectationFailure $ show changes
         Nothing -> expectationFailure "No import found"
 
@@ -105,7 +105,7 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport fooDecl)
+              changes = getChanges (addDeclToImportEdit hirImport fooDecl)
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "import TestTypes (foo)"
             _ -> expectationFailure $ show changes
@@ -124,7 +124,7 @@ spec = do
         Just import' -> do
           let dynNode = AST.getDynNode import'
               hirImport =  fromRight (error "Failed to parse import") $ Parse.parseImport import'
-              changes = getChanges (addDeclToImportEdit dynNode hirImport operatorDecl)
+              changes = getChanges (addDeclToImportEdit hirImport operatorDecl)
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "import TestTypes ((***))"
             _ -> expectationFailure $ show changes

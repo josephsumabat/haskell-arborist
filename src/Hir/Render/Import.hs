@@ -1,4 +1,16 @@
-module Hir.Render.Import (renderImport, Import (..), ImportItem (..), ImportChildren (..), Name (..), fromHirImport) where
+module Hir.Render.Import
+  (
+  renderImport
+  , Import (..)
+  , ImportItem (..)
+  , ImportChildren (..)
+  , Name (..)
+  , fromHirImport
+  , fromHirImportChildren
+  , fromHirImportItem
+  , fromHirImportList
+  , addToImportList
+  ) where
 
 import AST qualified
 import Data.Text qualified as Text
@@ -44,8 +56,11 @@ fromHirImport imp =
     , alias = imp.alias
     , qualified = imp.qualified
     , hiding = imp.hiding
-    , importList = fmap (map fromHirImportItem) imp.importList
+    , importList = fromHirImportList imp.importList
     }
+
+fromHirImportList :: Maybe [Hir.ImportItem] -> Maybe [ImportItem]
+fromHirImportList importList = fmap (map fromHirImportItem) importList
 
 -- | Convert Hir.ImportItem to ImportItem
 fromHirImportItem :: Hir.ImportItem -> ImportItem
@@ -109,10 +124,18 @@ renderImportChildren = Text.intercalate ", " . map renderImportChild
 renderImportChild :: ImportChildren -> Text.Text
 renderImportChild child = case child of
   ImportAllChildren -> ".."
-  ImportChild namespace name ->
+  ImportChild _namespace name ->
     let nameText = name.nameText
         wrappedName =
           if name.isOperator
             then "(" <> nameText <> ")"
             else nameText
      in wrappedName
+
+addToImportList :: Import -> ImportItem -> Import
+addToImportList origImport importItem =
+  ( origImport
+      { importList =
+          fmap (<> [importItem]) origImport.importList
+      }
+  )
