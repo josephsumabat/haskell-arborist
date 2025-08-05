@@ -32,11 +32,11 @@ findName modName name modIdx =
 emptyModIndex :: ModIndex
 emptyModIndex = Map.empty
 
-mkModIndex :: [Hir.Program] -> ModIndex
+mkModIndex :: [Hir.Program hirKind] -> ModIndex
 mkModIndex prgs =
   Map.fromList $ mapMaybe (\prg -> ((\mod -> (mod.text, mkNameIndex prg)) <$> prg.mod)) prgs
 
-mkNameIndex :: Hir.Program -> NameIndex
+mkNameIndex :: Hir.Program hirKind -> NameIndex
 mkNameIndex prg =
   Map.fromList $ (\decl -> (declNameText decl, declNameInfo decl)) <$> prg.decls
  where
@@ -45,4 +45,4 @@ mkNameIndex prg =
       { pos = (Hir.declDynNode decl).nodeLineColRange
       , name = declNameText decl
       }
-  declNameText decl = (Hir.declName decl).node.nodeText
+  declNameText decl = (Hir.declName decl).nameText

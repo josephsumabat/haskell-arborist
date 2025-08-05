@@ -32,6 +32,7 @@ import Data.Set qualified as Set
 import Data.Set.NonEmpty qualified as NESet
 import Data.Text qualified as T
 import Hir.Parse qualified as Hir
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 
 data RenamePhase
@@ -118,7 +119,7 @@ data RenamerEnv = RenamerEnv
 renamePrg ::
   ProgramIndex ->
   ExportIndex ->
-  Hir.Program ->
+  Hir.Read.Program ->
   Maybe (AST.Haskell RenamePhase)
 renamePrg availPrgs exportIdx prg =
   let initialScope = []
@@ -159,7 +160,7 @@ renamePrg availPrgs exportIdx prg =
         !newRenamerEnv = renamerEnv {scope = newScope}
      in (newRenamerEnv, go renamerEnv n : renamedChildren)
 
-  getImportModName :: Hir.Import -> ModNamespace
+  getImportModName :: Hir.Read.Import -> ModNamespace
   getImportModName imp = fromMaybe imp.mod imp.alias
 
   resolveNode :: RenamerEnv -> AST.DynNode -> AST.DynNode

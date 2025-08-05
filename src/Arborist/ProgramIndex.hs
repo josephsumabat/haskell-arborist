@@ -20,16 +20,16 @@ import Data.Text.Encoding qualified as T
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types
-import Hir.Types qualified as Hir
 import System.Directory qualified as Dir
 
 -- | In memory index of module -> program
-type ProgramIndex = Map.HashMap ModuleText Hir.Program
+type ProgramIndex = Map.HashMap ModuleText Hir.Read.Program
 
 -- | Find all dependencies required to resolve a given module and add them to a `ProgramIndex`
 -- Optionally accepts a maximum depth to search dependencies for
-gatherScopeDeps :: ProgramIndex -> Hir.Program -> ModFileMap -> Maybe Int -> IO ProgramIndex
+gatherScopeDeps :: ProgramIndex -> Hir.Read.Program -> ModFileMap -> Maybe Int -> IO ProgramIndex
 gatherScopeDeps prgIndex thisPrg modFileMap maxDepth = do
   prgs <- indexImports prgIndex thisPrg modFileMap maxDepth
   let prgsWithSelf = fromMaybe prgs ((\mod -> Map.insert mod thisPrg prgs) <$> thisPrg.mod)
@@ -43,7 +43,7 @@ getModFiles modFileMap mods =
 -- | Index all imports of a given program
 indexImports ::
   ProgramIndex ->
-  Hir.Program ->
+  Hir.Read.Program ->
   ModFileMap ->
   Maybe Int ->
   IO ProgramIndex
@@ -63,7 +63,7 @@ indexImports prgs thisPrg modFileMap maxDepth = do
 
   pure allPrgs
 
-indexImport :: ProgramIndex -> ModuleText -> Hir.Program -> ModFileMap -> Maybe Int -> IO (ProgramIndex)
+indexImport :: ProgramIndex -> ModuleText -> Hir.Read.Program -> ModFileMap -> Maybe Int -> IO (ProgramIndex)
 indexImport prgs modText thisPrg modFileMap maxDepth = do
   let addImports = Map.insert modText thisPrg prgs
    in indexTransitiveReExports addImports modText thisPrg modFileMap maxDepth
@@ -73,7 +73,7 @@ indexTransitiveReExports ::
   (HasCallStack) =>
   ProgramIndex ->
   ModuleText ->
-  Hir.Program ->
+  Hir.Read.Program ->
   ModFileMap ->
   Maybe Int ->
   IO (ProgramIndex)
@@ -88,7 +88,7 @@ resolveReexports ::
   (HasCallStack) =>
   ProgramIndex ->
   Set.Set ModuleText -> -- walked reexports
-  [(ModuleText, Hir.Program, Int)] -> -- worklist (with per-module depth)
+  [(ModuleText, Hir.Read.Program, Int)] -> -- worklist (with per-module depth)
   ModFileMap -> -- base directories to check for haskell files
   Maybe Int -> -- max depth
   IO (ProgramIndex)
@@ -135,18 +135,18 @@ resolveReexports prgs visited ((modText, prg, depth) : rest) modFileMap maxDepth
 
 -- | Return the parsed representation for each module in a given list of modules
 -- also indexes the parsed module such that each module is never re-parsed
-getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Program)], ProgramIndex)
+getPrgs :: ProgramIndex -> [(ModuleText, FilePath)] -> IO ([(ModuleText, Hir.Read.Program)], ProgramIndex)
 getPrgs prgs hsFiles =
   foldM step ([], Set.empty, prgs) hsFiles >>= \(newModules, _, updatedMap) -> do
     pure (newModules, updatedMap)
  where
   step ::
-    ( [(ModuleText, Program)] -- List of requested modules
+    ( [(ModuleText, Hir.Read.Program)] -- List of requested modules
     , Set.Set ModuleText -- Modules that we have already added to the list
     , ProgramIndex -- Updated program index
     ) ->
     (ModuleText, FilePath) -> -- Module to attempt to lookup
-    IO ([(ModuleText, Program)], Set.Set ModuleText, ProgramIndex)
+    IO ([(ModuleText, Hir.Read.Program)], Set.Set ModuleText, ProgramIndex)
   step (!parsedList, !seen, !prgIndex) (modText, file) =
     case (Map.lookup modText prgIndex, Set.member modText seen) of
       (_, True) -> pure (parsedList, seen, prgIndex)
@@ -167,7 +167,7 @@ getPrgs prgs hsFiles =
           else do
             pure (parsedList, seen, prgIndex)
 
-prgsToMap :: [Hir.Program] -> ProgramIndex
+prgsToMap :: [Hir.Read.Program] -> ProgramIndex
 prgsToMap prgs =
   Map.fromList $
     mapMaybe

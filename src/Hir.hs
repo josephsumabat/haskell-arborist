@@ -5,10 +5,10 @@ import Control.Error
 import Data.Text (Text)
 import Hir.Types
 
-declNameText :: Decl -> Text
-declNameText decl = (declName decl).node.nodeText
+declNameText :: Decl hirKind -> Text
+declNameText decl = (declName decl).nameText
 
-declName :: Decl -> Name
+declName :: Decl hirKind -> Name hirKind
 declName decl =
   case decl of
     DeclData v -> v.name
@@ -22,7 +22,7 @@ declName decl =
     DeclTypeFamily v -> v.name
     DeclTypeSynonym v -> v.name
 
-declDynNode :: Decl -> AST.DynNode
+declDynNode :: Decl hirKind -> AST.DynNode
 declDynNode decl =
   case decl of
     DeclData v -> AST.getDynNode v.node
@@ -36,18 +36,18 @@ declDynNode decl =
     DeclTypeFamily v -> AST.getDynNode v.node
     DeclTypeSynonym v -> AST.getDynNode v.node
 
-exportItemMods :: [ExportItem] -> [ModuleName]
+exportItemMods :: [ExportItem hirKind] -> [ModuleName]
 exportItemMods exports =
   mapMaybe exportItemToMod exports
  where
-  exportItemToMod :: ExportItem -> Maybe ModuleName
+  exportItemToMod :: ExportItem hirKind -> Maybe ModuleName
   exportItemToMod (ExportModuleItem mod) = Just mod
   exportItemToMod _ = Nothing
 
-exportItemNames :: [ExportItem] -> [Qualified]
+exportItemNames :: [ExportItem hirKind] -> [Qualified hirKind]
 exportItemNames exports =
   mapMaybe exportItemToName exports
  where
-  exportItemToName :: ExportItem -> Maybe Qualified
+  exportItemToName :: ExportItem hirKind -> Maybe (Qualified hirKind)
   exportItemToName (ExportItem {name}) = Just name
   exportItemToName _ = Nothing

@@ -1,11 +1,11 @@
 module Arborist.TreeSitter (parseExpectedNode) where
 
 import AST qualified
+import Control.Applicative
 import Data.Pos qualified as Pos
 import Data.Text qualified as Text
 import TreeSitter.Api qualified as TS
 import TreeSitter.Haskell qualified as TS
-import Control.Applicative
 
 data SingleNodeParseFailure
   = ExpectedNodeNotFound
@@ -39,5 +39,5 @@ renderFailure s =
 getFirstSatisfying :: (AST.DynNode -> Maybe b) -> AST.DynNode -> Maybe b
 getFirstSatisfying f n = go n
  where
-  go n = 
-      f n <|> asum (go <$> (TS.nodeChildren n))
+  go n =
+    f n <|> asum (go <$> (TS.nodeChildren n))

@@ -11,6 +11,7 @@ import Data.Either.Extra (eitherToMaybe)
 import Data.Maybe (mapMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 
 data ExportRewrite = ExportRewrite
@@ -20,33 +21,33 @@ data ExportRewrite = ExportRewrite
   deriving (Show, Eq)
 
 -- convert all export decls to [ExportRewrite]
-getAllDeclNames :: Hir.Program -> [ExportRewrite]
+getAllDeclNames :: Hir.Read.Program -> [ExportRewrite]
 getAllDeclNames prog = mapMaybe declToExportRewrite prog.decls
 
 -- change to parseP and get
-declToExportRewrite :: Hir.Decl -> Maybe ExportRewrite
+declToExportRewrite :: Hir.Read.Decl -> Maybe ExportRewrite
 declToExportRewrite decl =
   case decl of
     Hir.DeclBind bind ->
       let name = bind.name
-          nameText = name.node.nodeText
+          nameText = name.nameText
           wrapped
             | name.isOperator = "(" <> nameText <> ")"
             | otherwise = nameText
        in Just (ExportRewrite nameText wrapped)
     Hir.DeclData decl ->
       let name = decl.name
-          nameText = name.node.nodeText
+          nameText = name.nameText
           renderedName = nameText <> "(..)"
        in Just (ExportRewrite nameText renderedName)
     Hir.DeclNewtype decl ->
       let name = decl.name
-          nameText = name.node.nodeText
+          nameText = name.nameText
           renderedName = nameText <> "(..)"
        in Just (ExportRewrite nameText renderedName)
     Hir.DeclClass decl ->
       let name = decl.name
-          nameText = name.node.nodeText
+          nameText = name.nameText
           renderedName = nameText <> "(..)"
        in Just (ExportRewrite nameText renderedName)
     _ -> Nothing
@@ -88,7 +89,7 @@ writeNewExportList headerNode newExportRewriteList =
    in rewriteNode header newText
 
 -- given the program, finds the export node and the new list of exports to create an Edit
-getAllDeclExportEdit :: Hir.Program -> H.HeaderP -> Edit
+getAllDeclExportEdit :: Hir.Read.Program -> H.HeaderP -> Edit
 getAllDeclExportEdit prog header =
   let allDecls = getAllDeclNames prog
       mHeaderU = eitherToMaybe $ AST.unwrap header
@@ -97,7 +98,7 @@ getAllDeclExportEdit prog header =
         Just export -> rewriteExportList export allDecls
         Nothing -> maybe Edit.empty (\header -> (writeNewExportList header allDecls)) mHeaderU
 
-getDeclExportEdit :: H.HeaderP -> Hir.Decl -> Edit
+getDeclExportEdit :: H.HeaderP -> Hir.Read.Decl -> Edit
 getDeclExportEdit header newExport =
   let newDecl = (maybeToList (declToExportRewrite newExport))
       mHeaderU = eitherToMaybe $ AST.unwrap header

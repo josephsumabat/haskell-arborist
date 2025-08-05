@@ -1,92 +1,57 @@
-module Hir.Render.Import
-  (
-  renderImport
-  , Import (..)
-  , ImportItem (..)
-  , ImportChildren (..)
-  , Name (..)
-  , fromHirImport
-  , fromHirImportChildren
-  , fromHirImportItem
-  , fromHirImportList
-  , addToImportList
-  ) where
+module Hir.Render.Import (
+  renderImport,
+  fromReadImport,
+  fromReadImportChildren,
+  fromReadImportItem,
+  fromReadImportList,
+  addToImportList,
+) where
 
 import AST qualified
 import Data.Text qualified as Text
 import Hir.Types qualified as Hir
 
--- | Import without DynNode fields
-data Import = Import
-  { mod :: Hir.ModuleText
-  , alias :: Maybe Hir.ModuleText
-  , qualified :: !Bool
-  , hiding :: !Bool
-  , importList :: Maybe [ImportItem]
-  }
-  deriving (Show, Eq)
-
--- | ImportItem without DynNode fields
-data ImportItem = ImportItem
-  { namespace :: Hir.NameSpace
-  , name :: Name
-  , children :: [ImportChildren]
-  }
-  deriving (Show, Eq)
-
--- | ImportChildren without DynNode fields
-data ImportChildren
-  = ImportAllChildren
-  | ImportChild Hir.NameSpace Name
-  deriving (Show, Eq)
-
--- | Name without DynNode field
-data Name = Name
-  { nameText :: !Text.Text
-  , isOperator :: !Bool
-  , isConstructor :: !Bool
-  }
-  deriving (Show, Eq)
-
 -- | Convert Hir.Import to Import
-fromHirImport :: Hir.Import -> Import
-fromHirImport imp =
-  Import
+fromReadImport :: Hir.Import Hir.HirRead -> Hir.Import Hir.HirWrite
+fromReadImport imp =
+  Hir.Import
     { mod = imp.mod
     , alias = imp.alias
     , qualified = imp.qualified
     , hiding = imp.hiding
-    , importList = fromHirImportList imp.importList
+    , importList = fromReadImportList imp.importList
+    , dynNode = ()
     }
 
-fromHirImportList :: Maybe [Hir.ImportItem] -> Maybe [ImportItem]
-fromHirImportList importList = fmap (map fromHirImportItem) importList
+fromReadImportList :: Maybe [Hir.ImportItem Hir.HirRead] -> Maybe [Hir.ImportItem Hir.HirWrite]
+fromReadImportList importList = fmap (map fromReadImportItem) importList
 
 -- | Convert Hir.ImportItem to ImportItem
-fromHirImportItem :: Hir.ImportItem -> ImportItem
-fromHirImportItem item =
-  ImportItem
+fromReadImportItem :: Hir.ImportItem Hir.HirRead -> Hir.ImportItem Hir.HirWrite
+fromReadImportItem item =
+  Hir.ImportItem
     { namespace = item.namespace
-    , name = fromHirName item.name
-    , children = map fromHirImportChildren item.children
+    , name = fromReadName item.name
+    , children = map fromReadImportChildren item.children
     }
 
 -- | Convert Hir.ImportChildren to ImportChildren
-fromHirImportChildren :: Hir.ImportChildren -> ImportChildren
-fromHirImportChildren child = case child of
-  Hir.ImportAllChildren -> ImportAllChildren
-  Hir.ImportChild namespace name -> ImportChild namespace (fromHirName name)
+fromReadImportChildren :: Hir.ImportChildren Hir.HirRead -> Hir.ImportChildren Hir.HirWrite
+fromReadImportChildren child = case child of
+  Hir.ImportAllChildren -> Hir.ImportAllChildren
+  Hir.ImportChild namespace name -> Hir.ImportChild namespace (fromReadName name)
 
 -- | Convert Hir.Name to Name
-fromHirName :: Hir.Name -> Name
-fromHirName name =
-  Name
-    { nameText = Hir.nameText name
+fromReadName :: Hir.Name Hir.HirRead -> Hir.Name Hir.HirWrite
+fromReadName name =
+  Hir.Name
+    { nameText = name.nameText
     , isOperator = name.isOperator
     , isConstructor = name.isConstructor
+    , dynNode = ()
     }
 
-renderImport :: Import -> Text.Text
+renderImport :: Hir.Import Hir.HirWrite -> Text.Text
 renderImport imp =
   let base = "import " <> imp.mod.text
       withQualified = if imp.qualified then base <> " qualified" else base
@@ -100,11 +65,11 @@ renderImport imp =
    in withImportList
 
 -- | Render a list of import items
-renderImportItems :: [ImportItem] -> Text.Text
+renderImportItems :: [Hir.ImportItem Hir.HirWrite] -> Text.Text
 renderImportItems = Text.intercalate ", " . map renderImportItem
 
 -- | Render a single import item
-renderImportItem :: ImportItem -> Text.Text
+renderImportItem :: Hir.ImportItem Hir.HirWrite -> Text.Text
 renderImportItem item =
   let nameText = item.name.nameText
       wrappedName =
@@ -117,14 +82,14 @@ renderImportItem item =
    in withChildren
 
 -- | Render import children
-renderImportChildren :: [ImportChildren] -> Text.Text
+renderImportChildren :: [Hir.ImportChildren Hir.HirWrite] -> Text.Text
 renderImportChildren = Text.intercalate ", " . map renderImportChild
 
 -- | Render a single import child
-renderImportChild :: ImportChildren -> Text.Text
+renderImportChild :: Hir.ImportChildren Hir.HirWrite -> Text.Text
 renderImportChild child = case child of
-  ImportAllChildren -> ".."
-  ImportChild _namespace name ->
+  Hir.ImportAllChildren -> ".."
+  Hir.ImportChild _namespace name ->
     let nameText = name.nameText
         wrappedName =
           if name.isOperator
@@ -132,10 +97,10 @@ renderImportChild child = case child of
             else nameText
      in wrappedName
 
-addToImportList :: Import -> ImportItem -> Import
+addToImportList :: Hir.Import Hir.HirWrite -> Hir.ImportItem Hir.HirWrite -> Hir.Import Hir.HirWrite
 addToImportList origImport importItem =
   ( origImport
-      { importList =
+      { Hir.importList =
           fmap (<> [importItem]) origImport.importList
       }
   )

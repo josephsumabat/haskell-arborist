@@ -36,11 +36,11 @@ instance Hashable QualifiedName where
 type HaddockIndex = Map.HashMap QualifiedName HaddockInfo
 
 -- | Index haddocks for multiple programs
-indexManyPrgHaddocks :: HaddockIndex -> [Hir.Program] -> HaddockIndex
+indexManyPrgHaddocks :: HaddockIndex -> [Hir.Program Hir.HirRead] -> HaddockIndex
 indexManyPrgHaddocks haddockIndex prgs =
   List.foldl' (\acc prg -> indexPrgHaddocks acc prg) haddockIndex prgs
 
-indexPrgHaddocks :: HaddockIndex -> Hir.Program -> HaddockIndex
+indexPrgHaddocks :: HaddockIndex -> Hir.Program Hir.HirRead -> HaddockIndex
 indexPrgHaddocks haddockIndex prg =
   case prg.mod of
     Nothing ->
@@ -77,7 +77,7 @@ tryInitialHaddock haddockIndex mod imps decls =
            in case mName of
                 Just (decl : _) ->
                   let name = Hir.declName decl
-                      qualifiedName = QualifiedName mod (name.node.nodeText)
+                      qualifiedName = QualifiedName mod (name.nameText)
                       doc = HaddockInfo {text = haddockNode.dynNode.nodeText}
                       nextHaddockIndex = Map.insert qualifiedName doc haddockIndex
                    in nextHaddockIndex
@@ -97,7 +97,7 @@ step !haddockIndex mod (potentialHaddock : potentialDecl : rest) =
        in case mName of
             Just (decl : _) ->
               let name = Hir.declName decl
-                  qualifiedName = QualifiedName mod (name.node.nodeText)
+                  qualifiedName = QualifiedName mod (name.nameText)
                   doc = HaddockInfo {text = haddockNode.dynNode.nodeText}
                   nextHaddockIndex = Map.insert qualifiedName doc haddockIndex
                in step nextHaddockIndex mod rest

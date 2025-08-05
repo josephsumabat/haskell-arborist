@@ -4,7 +4,6 @@ import AST
 import AST.Haskell qualified as AST
 import Arborist.Haddock
 import Control.Applicative
-import Control.Monad qualified as Monad
 import Data.HashMap.Lazy qualified as Map
 import Data.Hashable
 import Data.LineColRange
@@ -12,13 +11,13 @@ import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Set.NonEmpty qualified as NES
 import Data.Text qualified as T
-import Hir.Types (Decl, ModuleText)
-import Hir.Types qualified as Hir
+import Hir.Read.Types qualified as Hir
+import Hir.Types
 
 -- | An intermediate representation of a declaration annotated
 data GlblDeclInfo = GlblDeclInfo
   { name :: T.Text
-  , decl :: Decl
+  , decl :: Hir.Decl
   , originatingMod :: ModuleText
   , importedFrom :: ImportInfo
   , requiresQualifier :: Bool
@@ -68,7 +67,7 @@ data GlblNameInfo = GlblNameInfo
   , originatingMod :: ModuleText
   , loc :: LineColRange
   , requiresQualifier :: Bool
-  , decl :: Decl
+  , decl :: Hir.Decl
   , nameKind :: NameKind
   }
   deriving (Show, Eq)
@@ -86,10 +85,10 @@ data GlblConstructorInfo = GlblConstructorInfo
 
 glblVarInfoToQualified :: GlblVarInfo -> QualifiedName
 glblVarInfoToQualified glbl =
-  QualifiedName glbl.originatingMod glbl.name.node.nodeText
+  QualifiedName glbl.originatingMod glbl.name.nameText
 
 glblNameInfoToQualified :: GlblNameInfo -> QualifiedName
-glblNameInfoToQualified name = QualifiedName name.originatingMod name.name.node.nodeText
+glblNameInfoToQualified glblName = QualifiedName glblName.originatingMod glblName.name.nameText
 
 -- | Collect global var infos that have the same qualified name
 -- e.g. all global var infos with qualified name MyModule.fn1 will be collected

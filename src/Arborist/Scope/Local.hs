@@ -15,34 +15,35 @@ import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Hir
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 
-addManyLocalPatVars :: Scope -> [Hir.Pattern] -> Scope
+addManyLocalPatVars :: Scope -> [Hir.Read.Pattern] -> Scope
 addManyLocalPatVars currScope pats =
   List.foldl'
     addLocalPatVars
     currScope
     (reverse pats) -- Reverse for efficiency
 
-addLocalPatVars :: Scope -> Hir.Pattern -> Scope
+addLocalPatVars :: Scope -> Hir.Read.Pattern -> Scope
 addLocalPatVars currScope pat =
-  let clearedScope = clearPrevLocalNames currScope (Hir.nameText . (.name) <$> pat.patVars)
+  let clearedScope = clearPrevLocalNames currScope ((.nameText) . (.name) <$> pat.patVars)
    in List.foldl'
         (addLocalBind)
         clearedScope
         (reverse pat.patVars) -- Reverse for efficiency
 
-addLocalLetBinds :: Scope -> Hir.LocalDecls -> Scope
+addLocalLetBinds :: Scope -> Hir.Read.LocalDecls -> Scope
 addLocalLetBinds currScope localBinds =
   let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls)
    in List.foldl' (addLocalLetDecl) clearedScope localBinds.decls
 
-addLocalWhereBinds :: Scope -> Hir.LocalDecls -> Scope
+addLocalWhereBinds :: Scope -> Hir.Read.LocalDecls -> Scope
 addLocalWhereBinds currScope localBinds =
   let clearedScope = clearPrevLocalNames currScope (declNameText <$> localBinds.decls)
    in List.foldl' (addLocalWhereDecl) clearedScope localBinds.decls
 
-addLocalBind :: Scope -> Hir.Variable -> Scope
+addLocalBind :: Scope -> Hir.Read.Variable -> Scope
 addLocalBind currScope var =
   let name = var.dynNode.nodeText
       mVarInfo = Map.lookup name currScope.lclVarInfo
@@ -55,9 +56,9 @@ addLocalBind currScope var =
       newInfo = LocalVarBind $ LocalBind var.dynNode NE.:| existing
    in insertScope currScope name newInfo
 
-addLocalWhereDecl :: Scope -> Hir.Decl -> Scope
+addLocalWhereDecl :: Scope -> Hir.Read.Decl -> Scope
 addLocalWhereDecl currScope localDecl =
-  let name = (declName localDecl).node.nodeText
+  let name = (declName localDecl).nameText
       mVarInfo = Map.lookup name currScope.lclVarInfo
       existing =
         case mVarInfo of
@@ -69,9 +70,9 @@ addLocalWhereDecl currScope localDecl =
         Just newInfo -> insertScope currScope name newInfo
         Nothing -> currScope
 
-addLocalLetDecl :: Scope -> Hir.Decl -> Scope
+addLocalLetDecl :: Scope -> Hir.Read.Decl -> Scope
 addLocalLetDecl currScope localDecl =
-  let name = (declName localDecl).node.nodeText
+  let name = (declName localDecl).nameText
       mVarInfo = Map.lookup name currScope.lclVarInfo
       existing =
         case mVarInfo of
@@ -98,7 +99,7 @@ clearPrevLocalNames scope names =
     scope
     names
 
-getNewLocalDecl :: [LocalDecl] -> Hir.Decl -> Maybe (NE.NonEmpty LocalDecl)
+getNewLocalDecl :: [LocalDecl] -> Hir.Read.Decl -> Maybe (NE.NonEmpty LocalDecl)
 getNewLocalDecl existing decl =
   let
     (newEntry, rest) = case decl of
@@ -116,13 +117,13 @@ getNewLocalDecl existing decl =
  where
   -- Note for binds we use the name location since a single raw bind
   -- can have multiple names bound
-  tryMergeBind :: Hir.BindDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
+  tryMergeBind :: Hir.Read.BindDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeBind b [] =
     ( Just
         ( LocalDecl
             { sig = Nothing
             , binds = [b]
-            , loc = (AST.getDynNode b.name.node).nodeLineColRange
+            , loc = (b.name.dynNode).nodeLineColRange
             }
         )
     , []
@@ -137,15 +138,15 @@ getNewLocalDecl existing decl =
         let (result, rest) = tryMergeBind b vs
          in (result, v : rest)
 
-  setBind :: Hir.BindDecl -> LocalDecl -> LocalDecl
+  setBind :: Hir.Read.BindDecl -> LocalDecl -> LocalDecl
   setBind b v =
     LocalDecl
       { binds = [b]
       , sig = v.sig
-      , loc = (AST.getDynNode b.name.node).nodeLineColRange
+      , loc = (b.name.dynNode).nodeLineColRange
       }
 
-  tryMergeSig :: Hir.SigDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
+  tryMergeSig :: Hir.Read.SigDecl -> [LocalDecl] -> (Maybe LocalDecl, [LocalDecl])
   tryMergeSig s [] =
     (Just (LocalDecl {sig = Just s, binds = [], loc = (AST.getDynNode s.node).nodeLineColRange}), [])
   tryMergeSig s (v : vs) =
@@ -157,7 +158,7 @@ getNewLocalDecl existing decl =
         let (result, rest) = tryMergeSig s vs
          in (result, v : rest)
 
-  setSig :: Hir.SigDecl -> LocalDecl -> LocalDecl
+  setSig :: Hir.Read.SigDecl -> LocalDecl -> LocalDecl
   setSig s v =
     LocalDecl
       { binds = v.binds
@@ -168,7 +169,7 @@ getNewLocalDecl existing decl =
             Just b -> (AST.getDynNode b.node).nodeLineColRange
       }
 
-addParam :: Scope -> Hir.Param -> Scope
+addParam :: Scope -> Hir.Read.Param -> Scope
 addParam scope param =
   case param of
     Hir.ParamVar var ->
@@ -176,7 +177,7 @@ addParam scope param =
             LocalParam
               { var = var
               }
-          lclVarName = Hir.nameText var.name
+          lclVarName = var.name.nameText
        in case Map.lookup lclVarName scope.lclVarInfo of
             Just (LocalVarParam p) ->
               scope

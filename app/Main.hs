@@ -469,20 +469,20 @@ lazyGetPrgs hsFiles = do
     pure (file, prog)
   pure $ Map.fromList $ mapMaybe (\(_, prg) -> (,prg) <$> prg.mod) entries
 
-parseFile :: [Char] -> IO Hir.Program
+parseFile :: [Char] -> IO (Hir.Program Hir.HirRead)
 parseFile file = do
   -- traceShowM $ "parsing: " <> file
   fileContents <- fmap TE.decodeUtf8 . BS.readFile $ file
   pure $ snd (parsePrg fileContents) -- Run `test` function
 
-getPrgs :: [FilePath] -> IO [Hir.Program]
+getPrgs :: [FilePath] -> IO [Hir.Program Hir.HirRead]
 getPrgs hsFiles =
   forM hsFiles $ \file -> do
     fileContents <- Text.readFile file
     let v = parsePrg fileContents
     pure $ snd v
 
-getParPrgs :: [FilePath] -> IO [Hir.Program]
+getParPrgs :: [FilePath] -> IO [Hir.Program Hir.HirRead]
 getParPrgs hsFiles = mapConcurrently processFile hsFiles
  where
   processFile file = do

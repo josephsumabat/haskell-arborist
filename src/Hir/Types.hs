@@ -1,3 +1,7 @@
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+
 -- | Hir represents a simplified parse tree
 module Hir.Types where
 
@@ -8,16 +12,26 @@ import AST.Haskell qualified as Haskell
 import AST.Sum (Nil, (:+))
 import Data.Function (on)
 import Data.Hashable (Hashable (..))
+import Data.Kind qualified as Kind
 import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 
-data WithNode node a = WithNode
-  { val :: a
-  , node :: node
-  }
-  deriving (Show, Eq)
+-- | An hir node with a dyn node
+data HirRead
+
+-- | An hir node with a read node
+data HirWrite
+
+class (Show (XDynNode s), Eq (XDynNode s)) => HirDynNode s where
+  type XDynNode s :: Kind.Type
+
+instance HirDynNode HirRead where
+  type XDynNode HirRead = DynNode
+
+instance HirDynNode HirWrite where
+  type XDynNode HirWrite = ()
 
 data NameSpace
   = NameSpaceValue
@@ -29,34 +43,29 @@ instance Hashable NameSpace
 
 type ThSplice = Haskell.TopSpliceP :+ Haskell.SpliceP
 
-data Name = Name
-  { node :: !DynNode
+data Name s
+  = Name
+  { dynNode :: (XDynNode s)
+  , nameText :: !Text
   , isOperator :: !Bool
   , isConstructor :: !Bool
   }
 
-nameText :: Name -> Text
-nameText n = n.node.nodeText
+deriving instance (HirDynNode s) => Show (Name s)
 
-data NameShow = NameShow {name :: Text, node :: DynNode}
-  deriving (Show, Eq)
+instance Eq (Name s) where
+  (==) = (==) `on` (.nameText)
 
-instance Show Name where
-  show Name {node} = show NameShow {name = AST.nodeToText node, node}
+instance Hashable (Name s) where
+  hashWithSalt salt name = hashWithSalt salt name.nameText
 
-instance Eq Name where
-  (==) = (==) `on` (.node.nodeText)
-
-instance Hashable Name where
-  hashWithSalt salt name = hashWithSalt salt name.node.nodeText
-
-data Qualified = Qualified
+data Qualified s = Qualified
   { mod :: Maybe ModuleName
-  , name :: Name
+  , name :: (Name s)
   }
   deriving (Show, Eq, Generic)
 
-instance Hashable Qualified
+instance Hashable (Qualified s)
 
 data ModuleText = ModuleText
   { parts :: NonEmpty Text
@@ -88,54 +97,56 @@ instance Ord ModuleName where
 instance Hashable ModuleName where
   hashWithSalt salt ModuleName {mod} = hashWithSalt salt mod
 
-data ImportChildren
+data ImportChildren s
   = ImportAllChildren
-  | ImportChild NameSpace Name
+  | ImportChild NameSpace (Name s)
   deriving (Show, Eq)
 
-data ImportItem = ImportItem
+data ImportItem s = ImportItem
   { namespace :: NameSpace
-  , name :: Name
-  , children :: [ImportChildren]
+  , name :: Name s
+  , children :: [ImportChildren s]
   }
   deriving (Show, Eq)
 
-data ExportChildren
+data ExportChildren s
   = ExportAllChildren
-  | ExportChild NameSpace Qualified
+  | ExportChild NameSpace (Qualified s)
   deriving (Show, Eq, Generic)
 
-instance Hashable ExportChildren
+instance Hashable (ExportChildren s)
 
-data ExportItem
+data ExportItem s
   = ExportItem
       { namespace :: NameSpace
-      , name :: Qualified
-      , children :: [ExportChildren]
+      , name :: (Qualified s)
+      , children :: [ExportChildren s]
       }
   | ExportModuleItem ModuleName
   deriving (Show, Eq, Generic)
 
-instance Hashable ExportItem
+instance Hashable (ExportItem s)
 
 data ImportName = ImportName
   { name :: Text
   }
   deriving (Show, Eq)
 
-data Import = Import
+data Import s = Import
   { mod :: ModuleText
   , alias :: Maybe ModuleText
   , qualified :: !Bool
   , hiding :: !Bool
-  , importList :: Maybe [ImportItem]
-  , dynNode :: !AST.DynNode
+  , importList :: Maybe [(ImportItem s)]
+  , dynNode :: (XDynNode s)
   }
-  deriving (Show, Eq)
 
-pattern OpenImport :: ModuleText -> AST.DynNode -> Import
-pattern OpenImport mod dynNode = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing, dynNode}
+deriving instance (HirDynNode s) => Show (Import s)
+deriving instance (HirDynNode s) => Eq (Import s)
 
+-- pattern OpenImport :: ModuleText -> AST.DynNode -> (Import Read)
+-- pattern OpenImport mod dynNode = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing, dynNode}
+--
 type ParseNameTypes =
   Haskell.NameP
     :+ Haskell.ConstructorP
@@ -147,92 +158,94 @@ type ParseNameTypes =
 
 type ParseQualifiedTypes = H.QualifiedP :+ ParseNameTypes
 
-data DataDecl = DataDecl
-  { name :: Name
+data DataDecl s = DataDecl
+  { name :: Name s
   , node :: H.DataTypeP
   }
   deriving (Show, Eq)
 
-data ClassDecl = ClassDecl
-  { name :: Name
+data ClassDecl s = ClassDecl
+  { name :: Name s
   , node :: H.ClassP
   }
   deriving (Show, Eq)
 
-data BindDecl = BindDecl
-  { name :: Name
+data BindDecl s = BindDecl
+  { name :: Name s
   , node :: H.BindP :+ H.FunctionP :+ AST.Nil
   }
   deriving (Show, Eq)
 
-data NameOrPat
-  = IsName Name
-  | IsPat Pattern
+data NameOrPat s
+  = IsName (Name s)
+  | IsPat (Pattern s)
   deriving (Show, Eq)
 
-data SigDecl = SigDecl
-  { name :: Name
+data SigDecl s = SigDecl
+  { name :: Name s
   , node :: H.SignatureP
   }
   deriving (Show, Eq)
 
-data DataFamilyDecl = DataFamilyDecl
-  {name :: Name, node :: H.DataFamilyP}
+data DataFamilyDecl s = DataFamilyDecl
+  { name :: Name s
+  , node :: H.DataFamilyP
+  }
   deriving (Show, Eq)
 
-data NewtypeDecl = NewtypeDecl
-  { name :: Name
+data NewtypeDecl s = NewtypeDecl
+  { name :: Name s
   , node :: H.NewtypeP
   }
   deriving (Show, Eq)
 
-data PatternSigDecl = PatternSigDecl
-  { name :: Name
+data PatternSigDecl s = PatternSigDecl
+  { name :: Name s
   , node :: H.SignatureP
   }
   deriving (Show, Eq)
 
-data PatternDecl = PatternDecl
-  { name :: Name
+data PatternDecl s = PatternDecl
+  { name :: Name s
   , node :: H.EquationP
   }
   deriving (Show, Eq)
 
-data TypeFamilyDecl = TypeFamilyDecl
-  { name :: Name
+data TypeFamilyDecl s = TypeFamilyDecl
+  { name :: Name s
   , node :: H.TypeFamilyP
   }
   deriving (Show, Eq)
 
-data TypeSynonymDecl = TypeSynonymDecl
-  { name :: Name
+data TypeSynonymDecl s = TypeSynonymDecl
+  { name :: Name s
   , node :: H.TypeSynomymP
   }
   deriving (Show, Eq)
 
-data Decl
-  = DeclData DataDecl
-  | DeclNewtype NewtypeDecl
-  | DeclClass ClassDecl
-  | DeclSig SigDecl
-  | DeclBind BindDecl
-  | DeclDataFamily DataFamilyDecl
-  | DeclPatternSig PatternSigDecl
-  | DeclPattern PatternDecl
-  | DeclTypeFamily TypeFamilyDecl
-  | DeclTypeSynonym TypeSynonymDecl
+data Decl s
+  = DeclData (DataDecl s)
+  | DeclNewtype (NewtypeDecl s)
+  | DeclClass (ClassDecl s)
+  | DeclSig (SigDecl s)
+  | DeclBind (BindDecl s)
+  | DeclDataFamily (DataFamilyDecl s)
+  | DeclPatternSig (PatternSigDecl s)
+  | DeclPattern (PatternDecl s)
+  | DeclTypeFamily (TypeFamilyDecl s)
+  | DeclTypeSynonym (TypeSynonymDecl s)
   deriving (Show, Eq)
 
-data Program = Program
+data Program s = Program
   { mod :: Maybe ModuleText
-  , imports :: [Import]
-  , exports :: Maybe [ExportItem]
-  , decls :: [Decl]
+  , imports :: [Import s]
+  , exports :: Maybe [ExportItem s]
+  , decls :: [Decl s]
   , node :: Haskell.HaskellP
   }
   deriving (Show, Eq)
 
-getImports :: Program -> [Import]
+getImports :: Program s -> [Import s]
 getImports prg = prg.imports
 
 type GetNameTypes =
@@ -249,35 +262,36 @@ data ThQuotedName = ThQuotedName
   , node :: AST.DynNode
   }
 
-data FunctionBind = FunctionBind
+data FunctionBind s
+  = FunctionBind
   { fnName :: Text
-  , params :: [Pattern]
+  , params :: [Pattern s]
   }
   deriving (Show, Eq)
 
-data Params = Params
-  { params :: [Param]
+data Params s = Params
+  { params :: [Param s]
   }
   deriving (Show, Eq)
 
-data Param
-  = ParamVar Variable
+data Param s
+  = ParamVar (Variable s)
   | ParamWildcard
   | ParamOther
   deriving (Show, Eq)
 
-data Pattern = Pattern
-  { patVars :: [Variable]
+data Pattern s = Pattern
+  { patVars :: [Variable s]
   }
   deriving (Show, Eq)
 
-data Variable = Variable
-  { name :: Name
+data Variable s = Variable
+  { name :: Name s
   , dynNode :: DynNode
   }
   deriving (Show, Eq)
 
-data LocalDecls = LocalDecls
-  { decls :: [Decl]
+data LocalDecls s = LocalDecls
+  { decls :: [Decl s]
   }
   deriving (Show, Eq)

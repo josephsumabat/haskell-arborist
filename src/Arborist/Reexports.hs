@@ -28,9 +28,11 @@ import Debug.Trace
 import GHC.IO
 import HaskellAnalyzer
 import Hir.Parse
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
 import Hir.Types qualified as HirImport (Import (..))
+import Hir.Write.Types qualified as Hir.Write
 import Text.Pretty.Simple
 
 -- | Find all modules in the program index that import the given module.
@@ -45,15 +47,15 @@ findImportingModules :: ProgramIndex -> Hir.ModuleText -> [Hir.ModuleText]
 findImportingModules programIndex targetModule =
   Map.keys $ Map.filter hasImport programIndex
  where
-  hasImport :: Hir.Program -> Bool
+  hasImport :: Hir.Program hirKind -> Bool
   hasImport program = any (\import_ -> import_.mod == targetModule) program.imports
 
 -- | Helper function to extract module names from export items
-exportItemMods :: [Hir.ExportItem] -> [Hir.ModuleName]
+exportItemMods :: [Hir.ExportItem hirKind] -> [Hir.ModuleName]
 exportItemMods exports =
   mapMaybe exportItemToMod exports
  where
-  exportItemToMod :: Hir.ExportItem -> Maybe Hir.ModuleName
+  exportItemToMod :: Hir.ExportItem hirKind -> Maybe Hir.ModuleName
   exportItemToMod (Hir.ExportModuleItem mod) = Just mod
   exportItemToMod _ = Nothing
 
@@ -87,7 +89,7 @@ runReplaceReexports = do
       prog <- unsafeInterleaveIO (parseFile file) -- Lazily read & parse file
       pure (file, prog)
     pure $ Map.fromList $ mapMaybe (\(_, prg) -> (,prg) <$> prg.mod) entries
-  parseFile :: [Char] -> IO Hir.Program
+  parseFile :: [Char] -> IO Hir.Read.Program
   parseFile file = do
     -- traceShowM $ "parsing: " <> file
     fileContents <- fmap TE.decodeUtf8 . BS.readFile $ file
@@ -102,13 +104,13 @@ replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexport
     )
     importingMods
 
-replaceModImports :: Hir.Program -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [Edit]
+replaceModImports :: Hir.Read.Program -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [Edit]
 replaceModImports prg targetMod modsToAdd reexportIdentifiers =
   let imports = prg.imports
       foundImports = filter (\imp -> imp.mod == targetMod) imports
    in (\foundImport -> replaceImport foundImport modsToAdd reexportIdentifiers) <$> foundImports
 
-toNewImport :: Render.Import -> Hir.ModuleText -> Set.Set Text.Text -> Maybe Render.Import
+toNewImport :: Hir.Write.Import -> Hir.ModuleText -> Set.Set Text.Text -> Maybe Hir.Write.Import
 toNewImport orig newMod reexportIdentifiers =
   let alias = orig.alias
       importList = filter (\importItem -> Set.member importItem.name.nameText reexportIdentifiers) <$> orig.importList
@@ -119,17 +121,18 @@ toNewImport orig newMod reexportIdentifiers =
           Just _xs -> orig.hiding
       qualified = orig.qualified
    in Just $
-        Render.Import
+        Hir.Import
           { mod = newMod
           , qualified
           , alias
           , hiding = orig.hiding
           , importList = orig.importList
+          , dynNode = ()
           }
 
-replaceImport :: Hir.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
+replaceImport :: Hir.Read.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
 replaceImport imp mods reexportIdentifiers =
   let dynNode = imp.dynNode
-      renderImp = Render.fromHirImport imp
+      renderImp = Render.fromReadImport imp
       newText = Text.unlines $ Render.renderImport <$> (catMaybes $ Just renderImp : ((\mod -> (toNewImport renderImp mod reexportIdentifiers)) <$> mods))
    in rewriteNode dynNode newText

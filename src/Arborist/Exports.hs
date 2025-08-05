@@ -19,8 +19,8 @@ import Data.List qualified as List
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Hir
-import Hir.Types (ModuleText)
-import Hir.Types qualified as Hir
+import Hir.Read.Types qualified as Hir
+import Hir.Types
 
 -- | Will include module name -> itself it the module is not imported with an alias
 type AliasModMap = Map.HashMap ModuleText [ModuleText]
@@ -58,14 +58,14 @@ getNameExportInfo availNames exports =
   getSearchableExportSet :: [Hir.ExportItem] -> Set.Set (T.Text, Maybe ModuleText)
   getSearchableExportSet = Set.fromList . map toPair . exportItemNames
    where
-    toPair qual = (qual.name.node.nodeText, (.mod) <$> qual.mod)
+    toPair qual = (qual.name.nameText, (.mod) <$> qual.mod)
 
 -- | Get names that are not declared in the current program
 getTransitiveReExportNames :: Hir.Program -> [Hir.ExportItem] -> Set.Set T.Text
 getTransitiveReExportNames prg exports =
   let declaredNames = fmap declNameText prg.decls
       declaredNamesSet = Set.fromList declaredNames
-      exportNamesSet = Set.fromList $ (.name.node.nodeText) <$> exportItemNames exports
+      exportNamesSet = Set.fromList $ (.name.nameText) <$> exportItemNames exports
    in exportNamesSet `Set.difference` declaredNamesSet
 
 modsFromAliases :: Map.HashMap ModuleText [ModuleText] -> [ModuleText] -> Set.Set ModuleText

@@ -27,22 +27,22 @@ import Data.Text qualified as T
 import GHC.Stack
 import Hir
 import Hir.Parse
-import Hir.Types (Decl, ModuleText)
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 
 data ExportedDecl = ExportedDecl
   { name :: T.Text
-  , mod :: ModuleText
-  , decl :: Decl
+  , mod :: Hir.ModuleText
+  , decl :: Hir.Read.Decl
   }
   deriving (Show)
 
-type ExportIndex = Map.HashMap ModuleText [ExportedDecl]
+type ExportIndex = Map.HashMap Hir.ModuleText [ExportedDecl]
 
-declToExportedName :: ModuleText -> Decl -> ExportedDecl
+declToExportedName :: Hir.ModuleText -> Hir.Read.Decl -> ExportedDecl
 declToExportedName modName decl =
   ExportedDecl
-    { name = (declName decl).node.nodeText
+    { name = (declName decl).nameText
     , mod = modName
     , decl = decl
     }
@@ -67,17 +67,17 @@ infoToExport glblInfo =
 
 -- | Get all declarations exported by a given export.
 -- Requires dependent programs in `ProgramIndex` or else will not find given imports
-getExportedDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> ModuleText -> ([ExportedDecl], ExportIndex)
+getExportedDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.ModuleText -> ([ExportedDecl], ExportIndex)
 getExportedDecls prgIdx exportIdx modName =
   getExportedDecls' prgIdx exportIdx Set.empty modName
 
-getManyImportDecls :: ProgramIndex -> ExportIndex -> [Hir.Import] -> ([GlblDeclInfo], ExportIndex)
+getManyImportDecls :: ProgramIndex -> ExportIndex -> [Hir.Read.Import] -> ([GlblDeclInfo], ExportIndex)
 getManyImportDecls prgIdx exportIdx imps =
   getManyImportDecls' prgIdx exportIdx Set.empty imps
 
 -- | Get all declarations from a given import
 -- Requires dependent programs in `ProgramIndex` or else will not find given imports
-getImportDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Import -> ([GlblDeclInfo], ExportIndex)
+getImportDecls :: (HasCallStack) => ProgramIndex -> ExportIndex -> Hir.Read.Import -> ([GlblDeclInfo], ExportIndex)
 getImportDecls prgIdx exportIdx imp =
   getImportDecls' prgIdx exportIdx Set.empty imp
 
@@ -86,8 +86,8 @@ getImportDecls' ::
   (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
-  Set.Set ModuleText ->
-  Hir.Import ->
+  Set.Set Hir.ModuleText ->
+  Hir.Read.Import ->
   ([GlblDeclInfo], ExportIndex)
 getImportDecls' prgIndex exportIndex inProgress thisImport =
   let qualified = thisImport.qualified
@@ -102,8 +102,8 @@ getManyImportDecls' ::
   (HasCallStack) =>
   ProgramIndex ->
   ExportIndex ->
-  Set.Set ModuleText ->
-  [Hir.Import] ->
+  Set.Set Hir.ModuleText ->
+  [Hir.Read.Import] ->
   ([GlblDeclInfo], ExportIndex)
 getManyImportDecls' prgIndex exportIndex inProgress imports =
   List.foldl'
@@ -117,8 +117,8 @@ getManyImportDecls' prgIndex exportIndex inProgress imports =
 getExportedDecls' ::
   ProgramIndex ->
   ExportIndex ->
-  Set.Set ModuleText ->
-  ModuleText ->
+  Set.Set Hir.ModuleText ->
+  Hir.ModuleText ->
   ([ExportedDecl], ExportIndex)
 getExportedDecls' prgIndex exportIndex inProgress modName
   | modName `Set.member` inProgress = ([], exportIndex)
@@ -126,7 +126,7 @@ getExportedDecls' prgIndex exportIndex inProgress modName
   | Just prg <- Map.lookup modName prgIndex = getExportedDeclsFromPrg prg
   | otherwise = ([], exportIndex)
  where
-  getExportedDeclsFromPrg :: (HasCallStack) => Hir.Program -> ([ExportedDecl], ExportIndex)
+  getExportedDeclsFromPrg :: (HasCallStack) => Hir.Read.Program -> ([ExportedDecl], ExportIndex)
   getExportedDeclsFromPrg prg =
     let declaredNames = getDeclaredNames modName prg
         inProgress' = Set.insert modName inProgress
@@ -184,12 +184,12 @@ getExportedDecls' prgIndex exportIndex inProgress modName
              in
               (allExportedNames, updateExportIdxWithSelf)
 
-getDeclaredNames :: ModuleText -> Hir.Program -> [ExportedDecl]
+getDeclaredNames :: Hir.ModuleText -> Hir.Read.Program -> [ExportedDecl]
 getDeclaredNames mod prg =
   fmap (declToExportedName mod) prg.decls
 
 -- this brings all possible decls into scope including hidden ones (but tagged), add tag
-getGlobalAvailableDecls :: ProgramIndex -> ExportIndex -> Hir.Program -> [GlblDeclInfo]
+getGlobalAvailableDecls :: ProgramIndex -> ExportIndex -> Hir.Read.Program -> [GlblDeclInfo]
 getGlobalAvailableDecls availPrgs exportIdx thisPrg =
   let
     declaredNames =
@@ -230,30 +230,30 @@ declToNameInfo d =
 
 -- | From a list of annotated declarations, attempt to build a scope - will try to
 -- merge associated declarations together (e.g. a type signature and multiple binds)
-globalDeclsToScope :: [GlblDeclInfo] -> [Hir.Import] -> Scope
+globalDeclsToScope :: [GlblDeclInfo] -> [Hir.Read.Import] -> Scope
 globalDeclsToScope availDecl imports =
   let filteredDecl = filterHiddenItems availDecl imports
    in List.foldl' indexDeclInfo emptyScope filteredDecl
  where
-  filterHiddenItems :: [GlblDeclInfo] -> [Hir.Import] -> [GlblDeclInfo]
+  filterHiddenItems :: [GlblDeclInfo] -> [Hir.Read.Import] -> [GlblDeclInfo]
   filterHiddenItems decls imps =
     filter (not . isHidden imps) decls
 
-  isHidden :: [Hir.Import] -> GlblDeclInfo -> Bool
+  isHidden :: [Hir.Read.Import] -> GlblDeclInfo -> Bool
   isHidden imps declInfo =
     case findMatchingImport imps declInfo of
       Nothing -> False
       Just imp -> shouldBeHidden imp declInfo
 
-  findMatchingImport :: [Hir.Import] -> GlblDeclInfo -> Maybe Hir.Import
+  findMatchingImport :: [Hir.Read.Import] -> GlblDeclInfo -> Maybe Hir.Read.Import
   findMatchingImport imps declInfo = List.find (\imp -> imp.mod == declInfo.importedFrom.mod) imps
 
-  shouldBeHidden :: Hir.Import -> GlblDeclInfo -> Bool
+  shouldBeHidden :: Hir.Read.Import -> GlblDeclInfo -> Bool
   shouldBeHidden imp declInfo =
     case imp.importList of
       Nothing -> False
       Just items ->
-        let importNames = Set.fromList $ (.nodeText) . (.node) . (.name) <$> items
+        let importNames = Set.fromList $ (.nameText) . (.name) <$> items
             isInList = Set.member declInfo.name importNames
          in if imp.hiding then isInList else not isInList
 
@@ -282,7 +282,7 @@ globalDeclsToScope availDecl imports =
         updatedNameMap = case mNameInfo of
           Nothing -> nameMap
           Just nameInfo ->
-            let key = nameInfo.name.node.nodeText
+            let key = nameInfo.name.nameText
                 impInfo = importedMod
                 nameMap = scope.glblNameInfo
                 importMap = Map.findWithDefault Map.empty key nameMap
@@ -302,17 +302,17 @@ globalDeclsToScope availDecl imports =
           , glblConstructorInfo = updatedConstructorMap
           }
 
-  equalSig :: Hir.SigDecl -> Hir.SigDecl -> Bool
+  equalSig :: Hir.Read.SigDecl -> Hir.Read.SigDecl -> Bool
   equalSig s1 s2 =
-    s1.name.node.nodeText == s2.name.node.nodeText
+    s1.name.nameText == s2.name.nameText
       && (AST.getDynNode s1.node).nodeText == (AST.getDynNode s2.node).nodeText
 
-  equalBind :: Hir.BindDecl -> Hir.BindDecl -> Bool
+  equalBind :: Hir.Read.BindDecl -> Hir.Read.BindDecl -> Bool
   equalBind b1 b2 =
-    b1.name.node.nodeText == b2.name.node.nodeText
+    b1.name.nameText == b2.name.nameText
       && (AST.getDynNode b1.node).nodeText == (AST.getDynNode b2.node).nodeText
 
-  tryMergeSig :: Hir.SigDecl -> Bool -> ImportInfo -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeSig :: Hir.Read.SigDecl -> Bool -> ImportInfo -> Hir.ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeSig s requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
@@ -346,7 +346,7 @@ globalDeclsToScope availDecl imports =
         let (result, rest) = tryMergeSig s requiresQualifier importedFrom origMod vs
          in (result, v : rest)
 
-  tryMergeBind :: Hir.BindDecl -> Bool -> ImportInfo -> ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
+  tryMergeBind :: Hir.Read.BindDecl -> Bool -> ImportInfo -> Hir.ModuleText -> [GlblVarInfo] -> (Maybe GlblVarInfo, [GlblVarInfo])
   tryMergeBind b requiresQualifier importedFrom origMod [] =
     ( Just
         GlblVarInfo
@@ -387,7 +387,7 @@ globalDeclsToScope availDecl imports =
 
   addSingleConstructor :: GlblConstructorInfoMap -> GlblConstructorInfo -> GlblConstructorInfoMap
   addSingleConstructor currentMap constructor =
-    let key = constructor.name.node.nodeText
+    let key = constructor.name.nameText
         impInfo = NES.findMin constructor.importedFrom
         importMap = Map.findWithDefault Map.empty key currentMap
         existing = Map.findWithDefault [] impInfo importMap
@@ -396,7 +396,7 @@ globalDeclsToScope availDecl imports =
 
   -- find all constructors
 
-  extractDataConstructors :: Hir.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractDataConstructors :: Hir.Read.DataDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractDataConstructors decl parentInfo =
     let dataTypeNode = decl.node
      in case unwrap dataTypeNode of
@@ -418,7 +418,7 @@ globalDeclsToScope availDecl imports =
               Just (AST.Inj @H.GadtConstructorsP _gadtConstructor) -> []
               _ -> []
 
-  extractNewtypeConstructor :: Hir.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
+  extractNewtypeConstructor :: Hir.Read.NewtypeDecl -> GlblDeclInfo -> [GlblConstructorInfo]
   extractNewtypeConstructor decl parentInfo =
     case unwrap (decl.node) of
       Right H.NewtypeU {dynNode = constructorDyn, constructor = constructorNode} ->
@@ -426,7 +426,7 @@ globalDeclsToScope availDecl imports =
          in maybeToList $ makeConstructorInfo parentInfo constructorDyn <$> mName
       _ -> []
 
-  parseDataConName :: AST.DataConstructorP -> Maybe Hir.Name
+  parseDataConName :: AST.DataConstructorP -> Maybe Hir.Read.Name
   parseDataConName dataConNode =
     case (.constructor) <$> AST.unwrapMaybe dataConNode of
       Just (AST.Inj @H.PrefixP p) ->
@@ -435,7 +435,7 @@ globalDeclsToScope availDecl imports =
         parseName . AST.Inj <$> (AST.unwrapMaybe r >>= (.name))
       _ -> Nothing
 
-  parseNewtypeConName :: AST.NewtypeConstructorP -> Maybe Hir.Name
+  parseNewtypeConName :: AST.NewtypeConstructorP -> Maybe Hir.Read.Name
   parseNewtypeConName newtypeCon =
     case (.name) <$> AST.unwrapMaybe newtypeCon of
       Just (AST.Inj @H.PrefixIdP p) ->
@@ -444,7 +444,7 @@ globalDeclsToScope availDecl imports =
         Just $ parseName (AST.Inj r)
       _ -> Nothing
 
-  makeConstructorInfo :: GlblDeclInfo -> DynNode -> Hir.Name -> GlblConstructorInfo
+  makeConstructorInfo :: GlblDeclInfo -> DynNode -> Hir.Read.Name -> GlblConstructorInfo
   makeConstructorInfo parentInfo conNode name =
     GlblConstructorInfo
       { name = name
