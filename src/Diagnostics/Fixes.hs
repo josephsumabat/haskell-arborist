@@ -1,0 +1,316 @@
+module Diagnostics.Fixes where
+
+import System.FilePath ( (</>) )
+import AST qualified
+import AST.Haskell qualified as H
+import Arborist.ProgramIndex
+import Arborist.Rewrite (rewriteNode, writeMultipleEdits)
+import Control.Error (catMaybes)
+import Control.Monad
+import Control.Applicative (asum)
+import Data.Edit as Edit
+import Data.HashMap.Lazy qualified as Map
+import Data.List (nubBy)
+import Data.Maybe (mapMaybe)
+import Data.Set qualified as Set
+import Data.Text qualified as Text
+import GHC.IO
+import Hir.Read.Types qualified as Hir.Read
+import Hir.Render.Import qualified as Render
+import Hir.Types qualified as Hir
+import Hir.Write.Types qualified as Hir.Write
+import qualified Diagnostics.ParseGHC as Diagnostics
+import qualified Data.Path as Path
+import Control.Exception
+import qualified Data.Text.IO as TextIO
+import Data.Text qualified as T
+import Diagnostics (Diagnostic (..), Severity (..))
+import FileWith (FileWith' (..))
+import Data.LineColRange (LineColRange (..))
+import Data.LineCol (LineCol (..))
+import Data.Pos (Pos (..))
+import Data.Range (Range (..))
+import HaskellAnalyzer
+import qualified Data.Rope as Rope
+
+fixRedundantImports :: IO ()
+fixRedundantImports = do
+  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
+  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
+  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+  putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
+  -- Debug: print all diagnostic messages
+  forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
+  let relevantDiagnostics = filter isRedundantImportDiagnostic diagnostics
+  putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
+  -- Process each diagnostic and collect edits
+  edits <- catMaybes <$> forM relevantDiagnostics mkDeletionInfo
+  -- Group edits by file path and deduplicate
+  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) edits
+  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
+  -- Debug: show what edits are being grouped
+  putStrLn $ "Total edits to apply: " ++ show (length edits)
+  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
+    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
+    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+      putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
+    writeMultipleEdits filePath fileEdits
+  putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
+
+fixNotInScope :: IO ()
+fixNotInScope = do
+  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
+  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
+  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+  putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
+  -- Debug: print all diagnostic messages
+  forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
+  let relevantDiagnostics = filter isNotInScopeDiagnostic diagnostics
+  putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-in-scope diagnostics"
+  -- Track processed files to avoid adding multiple imports to the same file
+  processedFiles <- forM relevantDiagnostics $ \d -> do
+    let FileWith filePath _ = d.range
+    let absFilePath = Path.toFilePath filePath
+    pure absFilePath
+  let uniqueFiles = Set.fromList processedFiles
+  -- Process each unique file and collect edits
+  edits <- forM (Set.toList uniqueFiles) $ \filePath -> do
+    putStrLn $ "Creating import edit for " ++ filePath
+    -- Create a dummy diagnostic for the file to reuse mkInsertionInfo
+    let dummyDiagnostic = Diagnostic 
+          { range = FileWith (Path.unsafeFilePathToAbs filePath) (LineColRange (LineCol (Pos 1) (Pos 1)) (LineCol (Pos 1) (Pos 1)))
+          , severity = Error
+          , message = ""
+          , code = Just "GHC-76037"
+          , codeUri = Nothing
+          }
+    mkInsertionInfo dummyDiagnostic
+  let validEdits = catMaybes edits
+  -- Group edits by file path and deduplicate
+  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) validEdits
+  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
+  -- Debug: show what edits are being grouped
+  putStrLn $ "Total edits to apply: " ++ show (length validEdits)
+  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
+    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
+    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+      putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
+    writeMultipleEdits filePath fileEdits
+  putStrLn $ "Processed " ++ show (Set.size uniqueFiles) ++ " files with not-in-scope diagnostics"
+
+fixNotExported :: IO ()
+fixNotExported = do
+  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
+  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
+  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+  putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
+  -- Debug: print all diagnostic messages
+  forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
+  let relevantDiagnostics = filter isNotExportedDiagnostic diagnostics
+  putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
+  -- Process each diagnostic and collect edits
+  edits <- forM relevantDiagnostics mkNotExportedDeletionInfo
+  let validEdits = catMaybes edits
+  -- Group edits by file path and deduplicate
+  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) validEdits
+  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
+  -- Debug: show what edits are being grouped
+  putStrLn $ "Total edits to apply: " ++ show (length validEdits)
+  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
+    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
+    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+      putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
+    writeMultipleEdits filePath fileEdits
+  putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
+
+replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [(Hir.ModuleText, [Edit])]
+replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexportIdentifiers =
+  mapMaybe
+    ( \importingMod ->
+        let mPrg = Map.lookup importingMod prgIndex
+         in (\prg -> (importingMod, replaceModImports prg reexportingMod reexportedMods reexportIdentifiers)) <$> mPrg
+    )
+    importingMods
+
+replaceModImports :: Hir.Read.Program -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [Edit]
+replaceModImports prg targetMod modsToAdd reexportIdentifiers =
+  let imports = prg.imports
+      foundImports = filter (\imp -> imp.mod == targetMod) imports
+   in (\foundImport -> replaceImport foundImport modsToAdd reexportIdentifiers) <$> foundImports
+
+toNewImport :: Hir.Write.Import -> Hir.ModuleText -> Set.Set Text.Text -> [Hir.Write.Import]
+toNewImport orig newMod reexportIdentifiers =
+  let alias = orig.alias
+      importList = filter (\importItem -> Set.member importItem.name.nameText reexportIdentifiers) <$> orig.importList
+      hiding =
+        case importList of
+          Nothing -> False
+          Just [] -> False
+          Just _xs -> orig.hiding
+      qualified = orig.qualified
+   in [
+      orig
+      ,
+        Hir.Import
+          { mod = newMod
+          , qualified
+          , alias
+          , hiding = orig.hiding
+          , importList = orig.importList
+          , dynNode = ()
+          }
+      ]
+
+replaceImport :: Hir.Read.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
+replaceImport imp mods reexportIdentifiers =
+  let dynNode = imp.dynNode
+      renderImp = Render.fromReadImport imp
+      newText = Text.unlines $ Render.renderImport <$> (((\mod -> (toNewImport renderImp mod reexportIdentifiers)) =<< mods))
+   in rewriteNode dynNode newText
+
+
+-- | Check if a diagnostic is about a redundant import
+isRedundantImportDiagnostic :: Diagnostic -> Bool
+isRedundantImportDiagnostic diagnostic =
+  diagnostic.code == Just "GHC-66111"
+
+isNotInScopeDiagnostic :: Diagnostic -> Bool
+isNotInScopeDiagnostic diagnostic =
+  diagnostic.code == Just "GHC-76037" ||
+  diagnostic.code == Just "GHC-88464"
+
+isNotExportedDiagnostic :: Diagnostic -> Bool
+isNotExportedDiagnostic diagnostic =
+  diagnostic.code == Just "GHC-61689"
+
+-- | Convert a diagnostic to a deletion edit that removes the redundant import line
+mkDeletionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))
+mkDeletionInfo diagnostic = do
+  let FileWith filePath range = diagnostic.range
+  let absFilePath = Path.toFilePath filePath
+  -- Debug: print the diagnostic range
+  putStrLn $ "Processing diagnostic: " ++ show range ++ " in " ++ absFilePath
+  -- Read the file content to calculate proper character positions
+  fileContent <- TextIO.readFile absFilePath
+  -- Convert LineColRange to Range for Edit operations
+  let editRange = Rope.lineColRangeToRange (Rope.fromText fileContent) range
+  putStrLn $ "Converted to Range: " ++ show editRange
+  -- Create a deletion edit
+  let deletionEdit = Edit.delete editRange
+  putStrLn $ "Created deletion edit for " ++ absFilePath
+  pure $ Just (absFilePath, deletionEdit)
+
+-- | Convert a diagnostic to a deletion edit that removes the not-exported item and optionally a following comma
+mkNotExportedDeletionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))
+mkNotExportedDeletionInfo diagnostic = do
+  let FileWith filePath range = diagnostic.range
+  let absFilePath = Path.toFilePath filePath
+  -- Debug: print the diagnostic range
+  putStrLn $ "Processing not-exported diagnostic: " ++ show range ++ " in " ++ absFilePath
+  -- Read the file content to calculate proper character positions
+  fileContent <- TextIO.readFile absFilePath
+  -- Convert LineColRange to Range for Edit operations
+  let editRange = Rope.lineColRangeToRange (Rope.fromText fileContent) range
+  putStrLn $ "Converted to Range: " ++ show editRange
+  -- Debug: show the exact content being deleted
+  let rope = Rope.fromText fileContent
+      deletedContent = Rope.indexRange rope editRange
+      deletedText = maybe "" Rope.toText deletedContent
+  putStrLn $ "Content to be deleted: '" ++ T.unpack deletedText ++ "'"
+  -- Debug: show more context around the range
+  let contextBefore = Range (editRange.start {pos = max 0 (editRange.start.pos - 10)}) editRange.start
+      contextAfter = Range editRange.end (editRange.end {pos = editRange.end.pos + 10})
+      beforeContent = Rope.indexRange rope contextBefore
+      afterContent = Rope.indexRange rope contextAfter
+      beforeText = maybe "" Rope.toText beforeContent
+      afterText = maybe "" Rope.toText afterContent
+  putStrLn $ "Context before: '" ++ T.unpack beforeText ++ "'"
+  putStrLn $ "Context after: '" ++ T.unpack afterText ++ "'"
+  -- Debug: show the full line containing the diagnostic
+  let lineStart = Range (editRange.start {pos = editRange.start.pos - 50}) editRange.start
+      lineEnd = Range editRange.end (editRange.end {pos = editRange.end.pos + 50})
+      lineContent = Rope.indexRange rope (Range lineStart.start lineEnd.end)
+      lineText = maybe "" Rope.toText lineContent
+  putStrLn $ "Full line context: '" ++ T.unpack lineText ++ "'"
+  -- Check if there's a comma following the range and what comes after it
+  let rope = Rope.fromText fileContent
+      endPos = editRange.end
+      commaRange = Range endPos (endPos {pos = endPos.pos + 1})
+      commaRope = Rope.indexRange rope commaRange
+      commaText = maybe "" Rope.toText commaRope
+      hasComma = commaText == "," && endPos.pos < Rope.length rope
+      -- Also check if the range itself ends with a comma
+      rangeEndsWithComma = not (T.null deletedText) && T.last deletedText == ','
+  putStrLn $ "Checking for comma after range: " ++ show commaRange ++ ", found: " ++ show commaText
+  putStrLn $ "Range ends with comma: " ++ show rangeEndsWithComma
+  -- Debug: show what comes after the range
+  let afterRange = Range editRange.end (editRange.end {pos = editRange.end.pos + 5})
+      afterContent = Rope.indexRange rope afterRange
+      afterText = maybe "" Rope.toText afterContent
+  putStrLn $ "Content after range: '" ++ T.unpack afterText ++ "'"
+  -- If there's a comma, check what comes after it to decide whether to delete it
+  let shouldDeleteComma = if hasComma then
+        let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
+            afterCommaRope = Rope.indexRange rope afterCommaRange
+            afterCommaText = maybe "" Rope.toText afterCommaRope
+            -- Only delete comma if it's followed by whitespace or another identifier (not closing parenthesis, etc.)
+            isFollowedByWhitespace = afterCommaText == " " || afterCommaText == "\n" || afterCommaText == "\t"
+            isFollowedByIdentifier = not (T.null afterCommaText) && T.head afterCommaText `elem` (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_")
+         in isFollowedByWhitespace || isFollowedByIdentifier
+      else False
+  -- If the range itself ends with a comma, we need to be more careful
+  let finalRange = if rangeEndsWithComma then
+        -- Don't extend the range if it already includes the comma
+        editRange
+      else if shouldDeleteComma then 
+        Range editRange.start (editRange.end {pos = editRange.end.pos + 1})
+      else 
+        editRange
+  putStrLn $ "Should delete comma: " ++ show shouldDeleteComma
+  putStrLn $ "After comma text: '" ++ T.unpack (if hasComma then 
+    let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
+        afterCommaRope = Rope.indexRange rope afterCommaRange
+        afterCommaText = maybe "" Rope.toText afterCommaRope
+     in afterCommaText else "") ++ "'"
+  putStrLn $ "Final deletion range: " ++ show finalRange
+  -- Create a deletion edit
+  let deletionEdit = Edit.delete finalRange
+  putStrLn $ "Created not-exported deletion edit for " ++ absFilePath
+  pure $ Just (absFilePath, deletionEdit)
+
+-- | Convert a diagnostic to an insertion edit that adds an import statement at the first import
+mkInsertionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))
+mkInsertionInfo diagnostic = do
+  let FileWith filePath range = diagnostic.range
+  let absFilePath = Path.toFilePath filePath
+  -- Debug: print the diagnostic range
+  putStrLn $ "Processing not-in-scope diagnostic: " ++ show range ++ " in " ++ absFilePath
+  -- Read the file content and parse it
+  fileContent <- TextIO.readFile absFilePath
+  let (_, program) = parsePrg fileContent
+  -- Find the first import statement in the AST
+  let firstImportPos = findFirstImportPosition program.node.dynNode
+  case firstImportPos of
+    Just pos -> do
+      putStrLn $ "Found first import at position: " ++ show pos
+      -- Create an insertion edit with a sample import statement
+      let importStatement = "import TestImport.Import.NoFoundation\n"
+      let insertionEdit = Edit.insert pos importStatement
+      putStrLn $ "Created import insertion edit for " ++ absFilePath
+      pure $ Just (absFilePath, insertionEdit)
+    Nothing -> do
+      putStrLn $ "No import statements found in " ++ absFilePath ++ ", skipping"
+      pure Nothing
+
+-- | Find the position of the first import statement in the AST
+findFirstImportPosition :: AST.DynNode -> Maybe Pos
+findFirstImportPosition node = go node
+ where
+  go n = 
+    case AST.cast @H.ImportP n of
+      Just _ -> Just n.nodeRange.start
+      Nothing -> asum (go <$> n.nodeChildren)
+

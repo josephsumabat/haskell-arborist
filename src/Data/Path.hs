@@ -81,7 +81,7 @@ filePathToAbs p = do
 unsafeFilePathToAbs :: (HasCallStack) => FilePath -> AbsPath
 unsafeFilePathToAbs p
   | FilePath.isAbsolute p = UncheckedPath p
-  | otherwise = error "unsafeOsPathToAbs: path is not absolute"
+  | otherwise = error $ "unsafeOsPathToAbs: path " <> p <> " is not absolute"
 
 relToAbsThrow :: (MonadThrow m, HasCallStack) => RelPath -> m AbsPath
 relToAbsThrow (UncheckedPath p) = filePathToAbsThrow p
