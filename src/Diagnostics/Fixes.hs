@@ -1,39 +1,39 @@
 module Diagnostics.Fixes where
 
-import System.FilePath ( (</>) )
 import AST qualified
 import AST.Haskell qualified as H
 import Arborist.ProgramIndex
 import Arborist.Rewrite (rewriteNode, writeMultipleEdits)
-import Control.Error (catMaybes)
-import Control.Monad
 import Control.Applicative (asum)
+import Control.Error (catMaybes)
+import Control.Exception
+import Control.Monad
 import Data.Edit as Edit
 import Data.HashMap.Lazy qualified as Map
+import Data.LineCol (LineCol (..))
+import Data.LineColRange (LineColRange (..))
 import Data.List (nubBy)
 import Data.Maybe (mapMaybe)
+import Data.Path qualified as Path
+import Data.Pos (Pos (..))
+import Data.Range (Range (..))
+import Data.Rope qualified as Rope
 import Data.Set qualified as Set
+import Data.Text qualified as T
 import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
+import Diagnostics (Diagnostic (..), Severity (..))
+import Diagnostics.ParseGHC qualified as Diagnostics
+import FileWith (FileWith' (..))
 import GHC.IO
+import HaskellAnalyzer
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
 import Hir.Write.Types qualified as Hir.Write
-import qualified Diagnostics.ParseGHC as Diagnostics
-import qualified Data.Path as Path
-import Control.Exception
-import qualified Data.Text.IO as TextIO
-import Data.Text qualified as T
-import Diagnostics (Diagnostic (..), Severity (..))
-import FileWith (FileWith' (..))
-import Data.LineColRange (LineColRange (..))
-import Data.LineCol (LineCol (..))
-import Data.Pos (Pos (..))
-import Data.Range (Range (..))
-import HaskellAnalyzer
-import qualified Data.Rope as Rope
+import System.FilePath ((</>))
 
-fixRedundantImports :: IO ()
+fixRedundantImports :: IO (Map.HashMap Path.AbsPath [Edit])
 fixRedundantImports = do
   info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
   let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
@@ -44,21 +44,29 @@ fixRedundantImports = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isRedundantImportDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
-  -- Process each diagnostic and collect edits
-  edits <- catMaybes <$> forM relevantDiagnostics mkDeletionInfo
-  -- Group edits by file path and deduplicate
-  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) edits
-  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
-  -- Debug: show what edits are being grouped
-  putStrLn $ "Total edits to apply: " ++ show (length edits)
-  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
-    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
-    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+  -- Process each diagnostic and collect edits in a Map
+  editsMap <- foldM collectEdit Map.empty relevantDiagnostics
+  -- Debug: show what edits are being collected
+  putStrLn $ "Total files with edits: " ++ show (Map.size editsMap)
+  forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
+    putStrLn $ "Collected " ++ show (length edits) ++ " edits for " ++ Path.toFilePath filePath
+    forM_ (zip [1 ..] edits) $ \(i, edit) -> do
       putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
-    writeMultipleEdits filePath fileEdits
   putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
+  pure editsMap
+ where
+  collectEdit :: Map.HashMap Path.AbsPath [Edit] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [Edit])
+  collectEdit acc diagnostic = do
+    maybeEdit <- mkDeletionInfo diagnostic
+    case maybeEdit of
+      Just (filePath, edit) ->
+        let absPath = Path.unsafeFilePathToAbs filePath
+            existingEdits = Map.findWithDefault [] absPath acc
+         in pure $ Map.insert absPath (edit : existingEdits) acc
+      Nothing ->
+        pure acc
 
-fixNotInScope :: IO ()
+fixNotInScope :: IO (Map.HashMap Path.AbsPath [Edit])
 fixNotInScope = do
   info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
   let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
@@ -72,35 +80,40 @@ fixNotInScope = do
   -- Track processed files to avoid adding multiple imports to the same file
   processedFiles <- forM relevantDiagnostics $ \d -> do
     let FileWith filePath _ = d.range
-    let absFilePath = Path.toFilePath filePath
-    pure absFilePath
+    pure filePath
   let uniqueFiles = Set.fromList processedFiles
-  -- Process each unique file and collect edits
-  edits <- forM (Set.toList uniqueFiles) $ \filePath -> do
-    putStrLn $ "Creating import edit for " ++ filePath
-    -- Create a dummy diagnostic for the file to reuse mkInsertionInfo
-    let dummyDiagnostic = Diagnostic 
-          { range = FileWith (Path.unsafeFilePathToAbs filePath) (LineColRange (LineCol (Pos 1) (Pos 1)) (LineCol (Pos 1) (Pos 1)))
-          , severity = Error
-          , message = ""
-          , code = Just "GHC-76037"
-          , codeUri = Nothing
-          }
-    mkInsertionInfo dummyDiagnostic
-  let validEdits = catMaybes edits
-  -- Group edits by file path and deduplicate
-  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) validEdits
-  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
-  -- Debug: show what edits are being grouped
-  putStrLn $ "Total edits to apply: " ++ show (length validEdits)
-  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
-    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
-    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+  -- Process each unique file and collect edits in a Map
+  editsMap <- foldM collectImportEdit Map.empty (Set.toList uniqueFiles)
+  -- Debug: show what edits are being collected
+  putStrLn $ "Total files with edits: " ++ show (Map.size editsMap)
+  forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
+    putStrLn $ "Collected " ++ show (length edits) ++ " edits for " ++ Path.toFilePath filePath
+    forM_ (zip [1 ..] edits) $ \(i, edit) -> do
       putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
-    writeMultipleEdits filePath fileEdits
   putStrLn $ "Processed " ++ show (Set.size uniqueFiles) ++ " files with not-in-scope diagnostics"
+  pure editsMap
+ where
+  collectImportEdit :: Map.HashMap Path.AbsPath [Edit] -> Path.AbsPath -> IO (Map.HashMap Path.AbsPath [Edit])
+  collectImportEdit acc filePath = do
+    putStrLn $ "Creating import edit for " ++ Path.toFilePath filePath
+    -- Create a dummy diagnostic for the file to reuse mkInsertionInfo
+    let dummyDiagnostic =
+          Diagnostic
+            { range = FileWith filePath (LineColRange (LineCol (Pos 1) (Pos 1)) (LineCol (Pos 1) (Pos 1)))
+            , severity = Error
+            , message = ""
+            , code = Just "GHC-76037"
+            , codeUri = Nothing
+            }
+    maybeEdit <- mkInsertionInfo dummyDiagnostic
+    case maybeEdit of
+      Just (_, edit) ->
+        let existingEdits = Map.findWithDefault [] filePath acc
+         in pure $ Map.insert filePath (edit : existingEdits) acc
+      Nothing ->
+        pure acc
 
-fixNotExported :: IO ()
+fixNotExported :: IO (Map.HashMap Path.AbsPath [Edit])
 fixNotExported = do
   info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
   let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
@@ -111,20 +124,51 @@ fixNotExported = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isNotExportedDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
-  -- Process each diagnostic and collect edits
-  edits <- forM relevantDiagnostics mkNotExportedDeletionInfo
-  let validEdits = catMaybes edits
-  -- Group edits by file path and deduplicate
-  let editsByFile = Map.fromListWith (++) $ map (\(path, edit) -> (path, [edit])) validEdits
-  let deduplicatedEditsByFile = Map.map (nubBy (\e1 e2 -> e1 == e2)) editsByFile
-  -- Debug: show what edits are being grouped
-  putStrLn $ "Total edits to apply: " ++ show (length validEdits)
-  forM_ (Map.toList deduplicatedEditsByFile) $ \(filePath, fileEdits) -> do
-    putStrLn $ "Applying " ++ show (length fileEdits) ++ " edits to " ++ filePath
-    forM_ (zip [1..] fileEdits) $ \(i, edit) -> do
+  -- Process each diagnostic and collect edits in a Map
+  editsMap <- foldM collectNotExportedEdit Map.empty relevantDiagnostics
+  -- Debug: show what edits are being collected
+  putStrLn $ "Total files with edits: " ++ show (Map.size editsMap)
+  forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
+    putStrLn $ "Collected " ++ show (length edits) ++ " edits for " ++ Path.toFilePath filePath
+    forM_ (zip [1 ..] edits) $ \(i, edit) -> do
       putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
-    writeMultipleEdits filePath fileEdits
   putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
+  pure editsMap
+ where
+  collectNotExportedEdit :: Map.HashMap Path.AbsPath [Edit] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [Edit])
+  collectNotExportedEdit acc diagnostic = do
+    maybeEdit <- mkNotExportedDeletionInfo diagnostic
+    case maybeEdit of
+      Just (filePath, edit) ->
+        let absPath = Path.unsafeFilePathToAbs filePath
+            existingEdits = Map.findWithDefault [] absPath acc
+         in pure $ Map.insert absPath (edit : existingEdits) acc
+      Nothing ->
+        pure acc
+
+-- | Apply the collected fixes to the filesystem
+applyFixes :: Map.HashMap Path.AbsPath [Edit] -> IO ()
+applyFixes fixes = do
+  putStrLn $ "Applying fixes to " ++ show (Map.size fixes) ++ " files"
+  forM_ (Map.toList fixes) $ \(filePath, edits) -> do
+    putStrLn $ "Applying " ++ show (length edits) ++ " edits to " ++ Path.toFilePath filePath
+    forM_ (zip [1 ..] edits) $ \(i, edit) -> do
+      putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
+    writeMultipleEdits (Path.toFilePath filePath) edits
+  putStrLn "All fixes applied successfully"
+
+-- | Run all fixes and apply them
+runAllFixes :: IO ()
+runAllFixes = do
+  redundantFixes <- fixRedundantImports
+  notInScopeFixes <- fixNotInScope
+  notExportedFixes <- fixNotExported
+
+  -- Combine all fixes
+  let allFixes = Map.unionWith (++) redundantFixes (Map.unionWith (++) notInScopeFixes notExportedFixes)
+
+  putStrLn $ "Combined fixes: " ++ show (Map.size allFixes) ++ " files with edits"
+  applyFixes allFixes
 
 replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [(Hir.ModuleText, [Edit])]
 replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexportIdentifiers =
@@ -151,10 +195,8 @@ toNewImport orig newMod reexportIdentifiers =
           Just [] -> False
           Just _xs -> orig.hiding
       qualified = orig.qualified
-   in [
-      orig
-      ,
-        Hir.Import
+   in [ orig
+      , Hir.Import
           { mod = newMod
           , qualified
           , alias
@@ -171,7 +213,6 @@ replaceImport imp mods reexportIdentifiers =
       newText = Text.unlines $ Render.renderImport <$> (((\mod -> (toNewImport renderImp mod reexportIdentifiers)) =<< mods))
    in rewriteNode dynNode newText
 
-
 -- | Check if a diagnostic is about a redundant import
 isRedundantImportDiagnostic :: Diagnostic -> Bool
 isRedundantImportDiagnostic diagnostic =
@@ -179,8 +220,8 @@ isRedundantImportDiagnostic diagnostic =
 
 isNotInScopeDiagnostic :: Diagnostic -> Bool
 isNotInScopeDiagnostic diagnostic =
-  diagnostic.code == Just "GHC-76037" ||
-  diagnostic.code == Just "GHC-88464"
+  diagnostic.code == Just "GHC-76037"
+    || diagnostic.code == Just "GHC-88464"
 
 isNotExportedDiagnostic :: Diagnostic -> Bool
 isNotExportedDiagnostic diagnostic =
@@ -252,29 +293,42 @@ mkNotExportedDeletionInfo diagnostic = do
       afterText = maybe "" Rope.toText afterContent
   putStrLn $ "Content after range: '" ++ T.unpack afterText ++ "'"
   -- If there's a comma, check what comes after it to decide whether to delete it
-  let shouldDeleteComma = if hasComma then
-        let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
-            afterCommaRope = Rope.indexRange rope afterCommaRange
-            afterCommaText = maybe "" Rope.toText afterCommaRope
-            -- Only delete comma if it's followed by whitespace or another identifier (not closing parenthesis, etc.)
-            isFollowedByWhitespace = afterCommaText == " " || afterCommaText == "\n" || afterCommaText == "\t"
-            isFollowedByIdentifier = not (T.null afterCommaText) && T.head afterCommaText `elem` (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'] ++ "_")
-         in isFollowedByWhitespace || isFollowedByIdentifier
-      else False
+  let shouldDeleteComma =
+        if hasComma
+          then
+            let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
+                afterCommaRope = Rope.indexRange rope afterCommaRange
+                afterCommaText = maybe "" Rope.toText afterCommaRope
+                -- Only delete comma if it's followed by whitespace or another identifier (not closing parenthesis, etc.)
+                isFollowedByWhitespace = afterCommaText == " " || afterCommaText == "\n" || afterCommaText == "\t"
+                isFollowedByIdentifier = not (T.null afterCommaText) && T.head afterCommaText `elem` (['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ "_")
+             in isFollowedByWhitespace || isFollowedByIdentifier
+          else False
   -- If the range itself ends with a comma, we need to be more careful
-  let finalRange = if rangeEndsWithComma then
-        -- Don't extend the range if it already includes the comma
-        editRange
-      else if shouldDeleteComma then 
-        Range editRange.start (editRange.end {pos = editRange.end.pos + 1})
-      else 
-        editRange
+  let finalRange =
+        if rangeEndsWithComma
+          then
+            -- Don't extend the range if it already includes the comma
+            editRange
+          else
+            if shouldDeleteComma
+              then
+                Range editRange.start (editRange.end {pos = editRange.end.pos + 1})
+              else
+                editRange
   putStrLn $ "Should delete comma: " ++ show shouldDeleteComma
-  putStrLn $ "After comma text: '" ++ T.unpack (if hasComma then 
-    let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
-        afterCommaRope = Rope.indexRange rope afterCommaRange
-        afterCommaText = maybe "" Rope.toText afterCommaRope
-     in afterCommaText else "") ++ "'"
+  putStrLn $
+    "After comma text: '"
+      ++ T.unpack
+        ( if hasComma
+            then
+              let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
+                  afterCommaRope = Rope.indexRange rope afterCommaRange
+                  afterCommaText = maybe "" Rope.toText afterCommaRope
+               in afterCommaText
+            else ""
+        )
+      ++ "'"
   putStrLn $ "Final deletion range: " ++ show finalRange
   -- Create a deletion edit
   let deletionEdit = Edit.delete finalRange
@@ -309,8 +363,7 @@ mkInsertionInfo diagnostic = do
 findFirstImportPosition :: AST.DynNode -> Maybe Pos
 findFirstImportPosition node = go node
  where
-  go n = 
+  go n =
     case AST.cast @H.ImportP n of
       Just _ -> Just n.nodeRange.start
       Nothing -> asum (go <$> n.nodeChildren)
-

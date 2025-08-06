@@ -1,6 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Arborist.Rewrite (rewriteNode, replaceRange, applyEdit, writeEdit, writeMultipleEdits, adjustEdit, applyMultipleEdits) where
+module Arborist.Rewrite (
+  rewriteNode,
+  replaceRange,
+  applyEdit,
+  writeEdit,
+  writeMultipleEdits,
+  adjustEdit,
+  applyMultipleEdits,
+) where
 
 import AST (DynNode)
 import AST qualified
@@ -9,13 +17,13 @@ import Data.Edit
 import Data.Edit qualified as Edit
 import Data.LineCol
 import Data.LineColRange
+import Data.List (foldl', sortOn)
+import Data.Ord qualified as Ord
 import Data.Pos
-import Data.Range (Range (..))
+import Data.Range as Range (Range (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-
-import Data.List (sortOn)
 
 replaceRange :: LineColRange -> Text -> Text -> Text
 replaceRange (LineColRange (LineCol startLine startCol) (LineCol endLine endCol)) replacement original =
@@ -48,8 +56,8 @@ applyEdit :: Edit -> Text -> Text
 applyEdit edit originalText =
   let changes = Edit.getChanges edit
       -- Sort changes by position (highest to lowest) to avoid position shifts
-      sortedChanges = reverse $ sortOn (\c -> c.delete.start.pos) changes
-   in foldl applyChange originalText sortedChanges
+      sortedChanges = sortOn (Ord.Down . (\c -> c.delete.start.pos)) changes
+   in foldl' applyChange originalText sortedChanges
  where
   applyChange :: Text -> Change -> Text
   applyChange text change =
@@ -59,6 +67,12 @@ applyEdit edit originalText =
         after = T.drop end text
         inserted = change.insert
      in before <> inserted <> after
+
+-- | Apply multiple edits to text content, adjusting positions for each edit
+applyMultipleEdits :: [Edit] -> Text -> Text
+applyMultipleEdits edits originalText =
+  let (finalText, _) = foldl' applyEditWithAdjustment (originalText, []) edits
+   in finalText
 
 -- | Apply an edit to a file and rewrite it
 writeEdit :: FilePath -> Edit -> IO ()
@@ -75,19 +89,13 @@ writeMultipleEdits filePath edits = do
   let newContent = applyMultipleEdits edits originalContent
   TIO.writeFile filePath newContent
 
--- | Apply multiple edits to text content, adjusting positions for each edit
-applyMultipleEdits :: [Edit] -> Text -> Text
-applyMultipleEdits edits originalText =
-  let (finalText, _) = foldl applyEditWithAdjustment (originalText, []) edits
-   in finalText
-
 -- | Apply a single edit to text, returning the adjusted text and position adjustments
 -- This tracks how each edit affects subsequent positions
 applyEditWithAdjustment :: (Text, [(Pos, Int)]) -> Edit -> (Text, [(Pos, Int)])
 applyEditWithAdjustment (text, adjustments) edit =
   let changes = Edit.getChanges edit
       -- Sort changes by position (highest to lowest) to avoid position shifts
-      sortedChanges = reverse $ sortOn (\c -> c.delete.start.pos) changes
+      sortedChanges = sortOn (Ord.Down . (\c -> c.delete.start.pos)) changes
       (newText, newAdjustments) = foldl applyChangeWithAdjustment (text, adjustments) sortedChanges
    in (newText, newAdjustments)
  where
@@ -125,4 +133,4 @@ adjustEdit edit adjustments =
   adjustChange adjustments change =
     let adjustedStart = change.delete.start {pos = adjustPosition change.delete.start adjustments}
         adjustedEnd = change.delete.end {pos = adjustPosition change.delete.end adjustments}
-     in change {delete = change.delete {start = adjustedStart, end = adjustedEnd}}
+     in change {delete = change.delete {Range.start = adjustedStart, end = adjustedEnd}}

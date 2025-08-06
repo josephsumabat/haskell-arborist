@@ -14,13 +14,13 @@ import Data.Maybe (fromJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
+import Diagnostics.Fixes
 import GHC.IO
 import HaskellAnalyzer
 import Hir.Parse
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 import Text.Pretty.Simple
-import Diagnostics.Fixes
 
 -- | Find all modules in the program index that import the given module.
 --
