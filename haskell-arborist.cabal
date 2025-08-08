@@ -48,9 +48,12 @@ library
       Arborist.ModExports
       Arborist.ProgramIndex
       Arborist.Reexports
+      Arborist.Refactor.Module
       Arborist.Renamer
       Arborist.Renamer.GlobalEnv
       Arborist.Rewrite
+      Arborist.Rewrite.Apply
+      Arborist.Rewrite.Core
       Arborist.Scope
       Arborist.Scope.Global
       Arborist.Scope.Local
@@ -59,6 +62,12 @@ library
       Data.Change
       Data.Edit
       Data.Path
+      Data.Rope
+      Data.SourceEdit
+      Diagnostics
+      Diagnostics.Fixes
+      Diagnostics.ParseGHC
+      FileWith
       HaskellAnalyzer
       Hir
       Hir.Parse
@@ -68,29 +77,33 @@ library
       Hir.Types
       Hir.Write.Types
       ModUtils
+      Scripts.DirCycles
   other-modules:
       Paths_haskell_arborist
   hs-source-dirs:
       src
   default-extensions:
-      FlexibleContexts
       BangPatterns
+      BlockArguments
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      ExplicitNamespaces
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
       OverloadedRecordDot
       OverloadedStrings
-      NoFieldSelectors
-      LambdaCase
-      DuplicateRecordFields
-      TypeApplications
-      TypeOperators
-      ImportQualifiedPost
       PatternSynonyms
-      NamedFieldPuns
-      DeriveGeneric
       RankNTypes
       ScopedTypeVariables
-      DataKinds
-      EmptyCase
       TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
   build-depends:
       aeson
@@ -110,16 +123,19 @@ library
     , nonempty-containers
     , optics
     , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
     , safe
     , text
     , text-range
+    , text-rope
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
     , unliftio
     , unordered-containers ==0.2.*
-  default-language: Haskell2010
+  default-language: GHC2021
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)
@@ -132,24 +148,27 @@ executable haskell-arborist
   hs-source-dirs:
       app
   default-extensions:
-      FlexibleContexts
       BangPatterns
+      BlockArguments
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      ExplicitNamespaces
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
       OverloadedRecordDot
       OverloadedStrings
-      NoFieldSelectors
-      LambdaCase
-      DuplicateRecordFields
-      TypeApplications
-      TypeOperators
-      ImportQualifiedPost
       PatternSynonyms
-      NamedFieldPuns
-      DeriveGeneric
       RankNTypes
       ScopedTypeVariables
-      DataKinds
-      EmptyCase
       TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates
   build-depends:
       aeson
@@ -170,16 +189,19 @@ executable haskell-arborist
     , nonempty-containers
     , optics
     , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
     , safe
     , text
     , text-range
+    , text-rope
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
     , unliftio
     , unordered-containers ==0.2.*
-  default-language: Haskell2010
+  default-language: GHC2021
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)
@@ -195,29 +217,33 @@ test-suite haskell-arborist-test
       Arborist.FilesSpec
       Arborist.HirSpec
       Arborist.ProgramIndexSpec
+      Arborist.Refactor.ModuleSpec
       TestImport
       Paths_haskell_arborist
   hs-source-dirs:
       test
   default-extensions:
-      FlexibleContexts
       BangPatterns
+      BlockArguments
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      ExplicitNamespaces
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
       OverloadedRecordDot
       OverloadedStrings
-      NoFieldSelectors
-      LambdaCase
-      DuplicateRecordFields
-      TypeApplications
-      TypeOperators
-      ImportQualifiedPost
       PatternSynonyms
-      NamedFieldPuns
-      DeriveGeneric
       RankNTypes
       ScopedTypeVariables
-      DataKinds
-      EmptyCase
       TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
   ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
   build-depends:
       aeson
@@ -240,16 +266,19 @@ test-suite haskell-arborist-test
     , nonempty-containers
     , optics
     , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
     , safe
     , text
     , text-range
+    , text-rope
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
     , tree-sitter-simple
     , unliftio
     , unordered-containers ==0.2.*
-  default-language: Haskell2010
+  default-language: GHC2021
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)
