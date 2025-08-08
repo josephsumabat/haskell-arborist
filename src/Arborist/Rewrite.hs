@@ -28,6 +28,8 @@ import Data.SourceEdit (SourceEdit(..), FsEdit(..))
 import Data.Path qualified as Path
 import System.FilePath qualified as FilePath
 import System.Directory qualified as Dir
+import Control.Exception qualified as E
+import System.IO qualified as IO
 import Arborist.Rewrite.Apply qualified as Apply
 import Arborist.Rewrite.Core (applyEdit, applyMultipleEdits, adjustEdit)
 
@@ -68,7 +70,10 @@ applySourceEdit SourceEdit{fileEdits, fsEdits} = do
   mapM_
     (\(absPath, edit) -> do
         let fp = Path.toFilePath absPath
-        Apply.writeEdit fp edit
+        res <- E.try (Apply.writeEdit fp edit) :: IO (Either E.SomeException ())
+        case res of
+          Left ex -> IO.hPutStrLn IO.stderr ("Warning: failed to apply edit to " <> fp <> ": " <> E.displayException ex)
+          Right _ -> pure ()
     )
     (HashMap.toList fileEdits)
   -- Apply filesystem edits (e.g., move files)
@@ -79,8 +84,16 @@ applySourceEdit SourceEdit{fileEdits, fsEdits} = do
     let srcFp = Path.toFilePath src
         dstFp = Path.toFilePath dst
         dstDir = FilePath.takeDirectory dstFp
-    Dir.createDirectoryIfMissing True dstDir
-    Dir.renamePath srcFp dstFp
+    -- Ensure destination directory exists; warn on failure and continue
+    resMkdir <- E.try (Dir.createDirectoryIfMissing True dstDir) :: IO (Either E.SomeException ())
+    case resMkdir of
+      Left ex -> IO.hPutStrLn IO.stderr ("Warning: failed to create directory " <> dstDir <> ": " <> E.displayException ex)
+      Right _ -> pure ()
+    -- Attempt the move; warn on failure and continue
+    resRename <- E.try (Dir.renamePath srcFp dstFp) :: IO (Either E.SomeException ())
+    case resRename of
+      Left ex -> IO.hPutStrLn IO.stderr ("Warning: failed to move file from " <> srcFp <> " to " <> dstFp <> ": " <> E.displayException ex)
+      Right _ -> pure ()
 
 -- | Apply a single edit to text, returning the adjusted text and position adjustments
 -- This tracks how each edit affects subsequent positions

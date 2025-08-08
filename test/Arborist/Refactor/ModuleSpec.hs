@@ -10,6 +10,9 @@ import Data.Change (Change(..))
 import Data.Path qualified as Path
 import Data.SourceEdit (FsEdit (..), SourceEdit (..))
 import Arborist.Refactor.Module (renameModule)
+import Arborist.Files (buildModuleFileMap)
+import System.Directory qualified as Dir
+import System.FilePath qualified as FilePath
 import Hir.Parse (parseModuleTextFromText)
 import TestImport (lazyGetPrgs)
 
@@ -18,9 +21,11 @@ spec = do
   describe "renameModule" $ do
     it "rewrites header and emits a move (even with no importers)" $ do
       prgs <- lazyGetPrgs [ "./test-data/auto-export/EmptyHeaderExample.hs" ]
+      modFileMap <- buildModuleFileMap ["./test-data/auto-export"]
+      baseDir <- Dir.getCurrentDirectory
       let oldMod = parseModuleTextFromText "StaticLS.IDE.SourceEdit"
           newMod = parseModuleTextFromText "StaticLS.IDE.Refactored.SourceEdit"
-          se@SourceEdit{fileEdits, fsEdits} = renameModule prgs oldMod newMod
+          se@SourceEdit{fileEdits, fsEdits} = renameModule prgs modFileMap baseDir oldMod newMod
 
       -- It should include at least one file edit and a move
       HashMap.size fileEdits `shouldSatisfy` (> 0)
@@ -28,7 +33,7 @@ spec = do
       -- Expect exact inserted text in the edit
       case HashMap.toList fileEdits of
         [(p, e)] -> do
-          Path.toFilePath p `shouldBe` "StaticLS/IDE/SourceEdit.hs"
+          Path.toFilePath p `shouldBe` FilePath.normalise (baseDir FilePath.</> "StaticLS/IDE/SourceEdit.hs")
           case getChanges e of
             [Change inserted _] -> inserted `shouldBe` "StaticLS.IDE.Refactored.SourceEdit"
             other -> expectationFailure ("unexpected edit changes: " <> show other)
@@ -36,6 +41,6 @@ spec = do
 
       case fsEdits of
         [FsEditMoveFile{src, dst}] -> do
-          Path.toFilePath src `shouldBe` "StaticLS/IDE/SourceEdit.hs"
-          Path.toFilePath dst `shouldBe` "StaticLS/IDE/Refactored/SourceEdit.hs"
+          Path.toFilePath src `shouldBe` FilePath.normalise (baseDir FilePath.</> "StaticLS/IDE/SourceEdit.hs")
+          Path.toFilePath dst `shouldBe` FilePath.normalise (baseDir FilePath.</> "StaticLS/IDE/Refactored/SourceEdit.hs")
         other -> expectationFailure ("unexpected fsEdits: " <> show other)

@@ -5,7 +5,7 @@ import Data.HashMap.Lazy qualified as Map
 import Data.Maybe
 import Hir.Types qualified as Hir
 import ModUtils
-import System.Directory (doesDirectoryExist, listDirectory)
+import System.Directory (doesDirectoryExist, listDirectory, makeAbsolute)
 import System.Directory.Extra
 import System.FilePath (takeExtension, (</>))
 
@@ -16,14 +16,15 @@ buildModuleFileMap ::
   [FilePath] -> -- base directories
   IO (Map.HashMap Hir.ModuleText FilePath)
 buildModuleFileMap baseDirs = do
-  filePairsPerDir <- forM baseDirs $ \baseDir -> do
-    exists <- doesDirectoryExist baseDir
+  absBaseDirs <- mapM makeAbsolute baseDirs
+  filePairsPerDir <- forM absBaseDirs $ \baseDirAbs -> do
+    exists <- doesDirectoryExist baseDirAbs
     if exists
       then do
-        hsFiles <- getAllHsFiles [baseDir]
-        validPairs <- forM hsFiles $ \file -> do
-          case unsafePathToModule [baseDir] file of
-            Just modText -> pure (Just (modText, file))
+        hsFiles <- getAllHsFiles [baseDirAbs]
+        validPairs <- forM hsFiles $ \fileAbs -> do
+          case unsafePathToModule [baseDirAbs] fileAbs of
+            Just modText -> pure (Just (modText, fileAbs))
             Nothing -> pure Nothing
         pure (catMaybes validPairs)
       else pure []

@@ -3,7 +3,8 @@ module Diagnostics.Fixes where
 import AST qualified
 import AST.Haskell qualified as H
 import Arborist.ProgramIndex
-import Arborist.Rewrite (rewriteNode, writeMultipleEdits)
+import Arborist.Rewrite (rewriteNode)
+import Arborist.Rewrite.Apply (writeMultipleEdits)
 import Control.Applicative (asum)
 import Control.Error (catMaybes)
 import Control.Exception

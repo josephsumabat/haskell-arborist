@@ -4,6 +4,7 @@ module Arborist.Refactor.Module (
 ) where
 
 import Arborist.ProgramIndex (ProgramIndex)
+import Arborist.Files (ModFileMap)
 import Arborist.Rewrite (rewriteNode)
 import AST qualified
 import AST.Haskell qualified as H
@@ -19,6 +20,8 @@ import Hir.Read.Types qualified as Hir.Read
 import Hir.Write.Types qualified as Hir.Write
 import Hir.Types qualified as Hir
 import ModUtils qualified as ModUtils
+import System.FilePath qualified as FilePath
+import Control.Applicative ((<|>))
 
 -- | Find all modules in the program index that import the given module.
 findImportingModules :: ProgramIndex -> Hir.ModuleText -> [Hir.ModuleText]
@@ -34,15 +37,35 @@ findImportingModules programIndex targetModule =
 --   - Adds a filesystem edit to move the file to its new path
 --
 --   Namespace aliasing is preserved: if an import used an alias, the alias is kept.
-renameModule :: ProgramIndex -> Hir.ModuleText -> Hir.ModuleText -> SourceEdit
-renameModule prgIndex oldMod newMod =
+renameModule :: ProgramIndex -> ModFileMap -> FilePath -> FilePath -> Hir.ModuleText -> Hir.ModuleText -> SourceEdit
+renameModule prgIndex modFileMap oldBaseAbs newBaseAbs oldMod newMod =
   let
-    -- Compute an (unsafe) absolute path for a module's .hs file
-    -- We coerce a relative path to AbsPath; the caller can normalize later
+    -- Compute a best-effort absolute path for a module's .hs file
+    -- Prefer entries from the provided ModFileMap; fall back to inferred path
     pathForModule :: Hir.ModuleText -> Path.AbsPath
     pathForModule m =
+      let file = Map.lookup m modFileMap
+                  <|> Map.lookup m fallbackMap
+          absolutize p =
+            let p' = if FilePath.isAbsolute p then p else FilePath.normalise (FilePath.combine oldBaseAbs p)
+             in Path.unsafeFilePathToAbs p'
+       in case file of
+            Just fp -> absolutize fp
+            Nothing -> absolutize (ModUtils.moduleToPath ".hs" m)
+
+    -- Destination path under the new base for a module
+    pathForModuleNewBase :: Hir.ModuleText -> Path.AbsPath
+    pathForModuleNewBase m =
       let rel = ModUtils.moduleToPath ".hs" m
-       in Path.uncheckedCoercePath (Path.filePathToRel rel)
+          absP = if FilePath.isAbsolute rel then rel else FilePath.normalise (FilePath.combine newBaseAbs rel)
+       in Path.unsafeFilePathToAbs absP
+
+    -- Fallback map using inferred relative paths for any modules not present
+    fallbackMap =
+      Map.fromList
+        [ (m, ModUtils.moduleToPath ".hs" m)
+        | (m, _prg) <- Map.toList prgIndex
+        ]
 
     -- Rewrite a single import of the old module to the new module, preserving alias/flags
     rewriteImport :: Hir.Read.Import -> Edit
@@ -93,6 +116,6 @@ renameModule prgIndex oldMod newMod =
     moveEdits =
       if oldMod == newMod
         then []
-        else [ FsEditMoveFile { src = pathForModule oldMod, dst = pathForModule newMod } ]
+        else [ FsEditMoveFile { src = pathForModule oldMod, dst = pathForModuleNewBase newMod } ]
   in
     SourceEdit { fileEdits = fileEditsMap, fsEdits = moveEdits }
