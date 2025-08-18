@@ -54,14 +54,13 @@ exportItemMods exports =
 runReplaceReexports :: IO ()
 runReplaceReexports = do
   let targetReexporting = parseModuleTextFromText "TestImport"
-  let reexport = parseModuleTextFromText "TestImport.Import.NoFoundation"
-  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test", "../mercury-web-backend/local-packages/a-mercury-prelude/src"]
+  let reexport = parseModuleTextFromText "PersistentModels.MercuryAccount"
+  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc
   let reexportPrg = fromJust (Map.lookup reexport srcPrgs)
   let importingModules = findImportingModules srcPrgs targetReexporting
-  putStrLn $ "Modules importing TestImport" ++ show importingModules
   let glblAvail = getGlobalAvailableDecls srcPrgs Map.empty (fromJust $ Map.lookup reexport srcPrgs)
   let reexportScope = globalDeclsToScope glblAvail reexportPrg.imports
   let reexportIdentifiers =

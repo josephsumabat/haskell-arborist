@@ -13,8 +13,8 @@ import Data.Edit as Edit
 import Data.HashMap.Lazy qualified as Map
 import Data.LineCol (LineCol (..))
 import Data.LineColRange (LineColRange (..))
-import Data.List (nubBy)
-import Data.Maybe (mapMaybe)
+import Data.List (nubBy, find, findIndex, scanl)
+import Data.Maybe (mapMaybe, listToMaybe)
 import Data.Path qualified as Path
 import Data.Pos (Pos (..))
 import Data.Range (Range (..))
@@ -45,15 +45,20 @@ fixRedundantImports = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isRedundantImportDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
+  
+  -- Deduplicate diagnostics based on file path, range, and message
+  let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
+  putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique redundant import diagnostics"
+  
   -- Process each diagnostic and collect edits in a Map
-  editsMap <- foldM collectEdit Map.empty relevantDiagnostics
+  editsMap <- foldM collectEdit Map.empty deduplicatedDiagnostics
   -- Debug: show what edits are being collected
   putStrLn $ "Total files with edits: " ++ show (Map.size editsMap)
   forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
     putStrLn $ "Collected " ++ show (length edits) ++ " edits for " ++ Path.toFilePath filePath
     forM_ (zip [1 ..] edits) $ \(i, edit) -> do
       putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
-  putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
+  putStrLn $ "Processed " ++ show (length deduplicatedDiagnostics) ++ " redundant import diagnostics"
   pure editsMap
  where
   collectEdit :: Map.HashMap Path.AbsPath [Edit] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [Edit])
@@ -125,15 +130,20 @@ fixNotExported = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isNotExportedDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
+  
+  -- Deduplicate diagnostics based on file path, range, and message
+  let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
+  putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique not-exported diagnostics"
+  
   -- Process each diagnostic and collect edits in a Map
-  editsMap <- foldM collectNotExportedEdit Map.empty relevantDiagnostics
+  editsMap <- foldM collectNotExportedEdit Map.empty deduplicatedDiagnostics
   -- Debug: show what edits are being collected
   putStrLn $ "Total files with edits: " ++ show (Map.size editsMap)
   forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
     putStrLn $ "Collected " ++ show (length edits) ++ " edits for " ++ Path.toFilePath filePath
     forM_ (zip [1 ..] edits) $ \(i, edit) -> do
       putStrLn $ "  Edit " ++ show i ++ ": " ++ show edit
-  putStrLn $ "Processed " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
+  putStrLn $ "Processed " ++ show (length deduplicatedDiagnostics) ++ " not-exported diagnostics"
   pure editsMap
  where
   collectNotExportedEdit :: Map.HashMap Path.AbsPath [Edit] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [Edit])
@@ -162,14 +172,17 @@ applyFixes fixes = do
 runAllFixes :: IO ()
 runAllFixes = do
   redundantFixes <- fixRedundantImports
-  notInScopeFixes <- fixNotInScope
+  --notInScopeFixes <- fixNotInScope
   notExportedFixes <- fixNotExported
 
   -- Combine all fixes
-  let allFixes = Map.unionWith (++) redundantFixes (Map.unionWith (++) notInScopeFixes notExportedFixes)
+  --let allFixes = Map.unionWith (++) redundantFixes (Map.unionWith (++) notInScopeFixes notExportedFixes)
+  let allFixes = notExportedFixes `combine` redundantFixes
 
   putStrLn $ "Combined fixes: " ++ show (Map.size allFixes) ++ " files with edits"
   applyFixes allFixes
+  where
+    combine = Map.unionWith (++)
 
 replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [(Hir.ModuleText, [Edit])]
 replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexportIdentifiers =
@@ -252,91 +265,41 @@ mkNotExportedDeletionInfo diagnostic = do
   let absFilePath = Path.toFilePath filePath
   -- Debug: print the diagnostic range
   putStrLn $ "Processing not-exported diagnostic: " ++ show range ++ " in " ++ absFilePath
+  putStrLn $ "Diagnostic message: " ++ T.unpack diagnostic.message
+  
   -- Read the file content to calculate proper character positions
   fileContent <- TextIO.readFile absFilePath
-  -- Convert LineColRange to Range for Edit operations
-  let editRange = Rope.lineColRangeToRange (Rope.fromText fileContent) range
-  putStrLn $ "Converted to Range: " ++ show editRange
-  -- Debug: show the exact content being deleted
   let rope = Rope.fromText fileContent
-      deletedContent = Rope.indexRange rope editRange
+  -- Convert LineColRange to Range for Edit operations
+  let editRange = Rope.lineColRangeToRange rope range
+  putStrLn $ "Converted to Range: " ++ show editRange
+  
+  -- Debug: show the exact content being deleted
+  let deletedContent = Rope.indexRange rope editRange
       deletedText = maybe "" Rope.toText deletedContent
   putStrLn $ "Content to be deleted: '" ++ T.unpack deletedText ++ "'"
-  -- Debug: show more context around the range
-  let contextBefore = Range (editRange.start {pos = max 0 (editRange.start.pos - 10)}) editRange.start
-      contextAfter = Range editRange.end (editRange.end {pos = editRange.end.pos + 10})
-      beforeContent = Rope.indexRange rope contextBefore
-      afterContent = Rope.indexRange rope contextAfter
-      beforeText = maybe "" Rope.toText beforeContent
-      afterText = maybe "" Rope.toText afterContent
-  putStrLn $ "Context before: '" ++ T.unpack beforeText ++ "'"
-  putStrLn $ "Context after: '" ++ T.unpack afterText ++ "'"
-  -- Debug: show the full line containing the diagnostic
-  let lineStart = Range (editRange.start {pos = editRange.start.pos - 50}) editRange.start
-      lineEnd = Range editRange.end (editRange.end {pos = editRange.end.pos + 50})
-      lineContent = Rope.indexRange rope (Range lineStart.start lineEnd.end)
-      lineText = maybe "" Rope.toText lineContent
-  putStrLn $ "Full line context: '" ++ T.unpack lineText ++ "'"
-  -- Check if there's a comma following the range and what comes after it
-  let rope = Rope.fromText fileContent
-      endPos = editRange.end
-      commaRange = Range endPos (endPos {pos = endPos.pos + 1})
-      commaRope = Rope.indexRange rope commaRange
-      commaText = maybe "" Rope.toText commaRope
-      hasComma = commaText == "," && endPos.pos < Rope.length rope
-      -- Also check if the range itself ends with a comma
-      rangeEndsWithComma = not (T.null deletedText) && T.last deletedText == ','
-  putStrLn $ "Checking for comma after range: " ++ show commaRange ++ ", found: " ++ show commaText
-  putStrLn $ "Range ends with comma: " ++ show rangeEndsWithComma
-  -- Debug: show what comes after the range
-  let afterRange = Range editRange.end (editRange.end {pos = editRange.end.pos + 5})
-      afterContent = Rope.indexRange rope afterRange
+  
+  -- Check if there's a comma after the range
+  let endPos = editRange.end
+      -- Look for a comma in the next few characters after the range
+      searchRange = Range endPos (endPos {pos = endPos.pos + 10})
+      afterContent = Rope.indexRange rope searchRange
       afterText = maybe "" Rope.toText afterContent
   putStrLn $ "Content after range: '" ++ T.unpack afterText ++ "'"
-  -- If there's a comma, check what comes after it to decide whether to delete it
-  let shouldDeleteComma =
-        if hasComma
-          then
-            let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
-                afterCommaRope = Rope.indexRange rope afterCommaRange
-                afterCommaText = maybe "" Rope.toText afterCommaRope
-                -- Only delete comma if it's followed by whitespace or another identifier (not closing parenthesis, etc.)
-                isFollowedByWhitespace = afterCommaText == " " || afterCommaText == "\n" || afterCommaText == "\t"
-                isFollowedByIdentifier = not (T.null afterCommaText) && T.head afterCommaText `elem` (['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ "_")
-             in isFollowedByWhitespace || isFollowedByIdentifier
-          else False
-  -- If the range itself ends with a comma, we need to be more careful
+  
+  -- Check if there's a comma immediately after the item
   let finalRange =
-        if rangeEndsWithComma
-          then
-            -- Don't extend the range if it already includes the comma
-            editRange
-          else
-            if shouldDeleteComma
-              then
-                Range editRange.start (editRange.end {pos = editRange.end.pos + 1})
-              else
-                editRange
-  putStrLn $ "Should delete comma: " ++ show shouldDeleteComma
-  putStrLn $
-    "After comma text: '"
-      ++ T.unpack
-        ( if hasComma
-            then
-              let afterCommaRange = Range (endPos {pos = endPos.pos + 1}) (endPos {pos = endPos.pos + 2})
-                  afterCommaRope = Rope.indexRange rope afterCommaRange
-                  afterCommaText = maybe "" Rope.toText afterCommaRope
-               in afterCommaText
-            else ""
-        )
-      ++ "'"
+        case T.uncons afterText of
+          Just (',', _) ->
+            -- Include the comma in the deletion
+            Range editRange.start (endPos {pos = endPos.pos + 1})
+          _ -> editRange  -- Just delete the range as-is
+  
   putStrLn $ "Final deletion range: " ++ show finalRange
-  -- Create a deletion edit
   let deletionEdit = Edit.delete finalRange
-  putStrLn $ "Created not-exported deletion edit for " ++ absFilePath
+  putStrLn $ "Created deletion edit for " ++ absFilePath
   pure $ Just (absFilePath, deletionEdit)
 
--- | Convert a diagnostic to an insertion edit that adds an import statement at the first import
 mkInsertionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))
 mkInsertionInfo diagnostic = do
   let FileWith filePath range = diagnostic.range

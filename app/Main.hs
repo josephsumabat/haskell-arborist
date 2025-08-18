@@ -40,9 +40,15 @@ import Hir.Types qualified as Hir
 import System.IO
 import Text.Pretty.Simple
 import UnliftIO (mapConcurrently)
+import Scripts.DirCycles
 
 main :: IO ()
 main = do
+  -- runDetectCycles
+  -- runRenameModule
+  pure ()
+
+old =
   time "everything" $ do
     let srcWithLps =
           ( [ "../mercury-web-backend/src"

@@ -24,7 +24,7 @@ import Control.Monad (forM)
 import Data.ByteString qualified as BS
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe, listToMaybe)
 import Data.Set qualified as Set
 import Data.Text.Encoding qualified as TE
 import Data.Text qualified as T
@@ -218,8 +218,8 @@ runDetectCycles :: IO ()
 runDetectCycles = do
   -- Only print sample module paths between two targets
   let srcDirs = ["../mercury-web-backend/src"]
-      dirA = "Mercury/Banking/Alerts/AlertWorker"
-      dirB = "Mercury/DecisionEngine/Rules/Alerts"
+      dirA = "Mercury/Authorization"
+      dirB = "PersistentModels"
   (mg, _dg) <- buildDirectoryCyclesContext srcDirs
   let maxDepth = 6
       maxPaths = 50
@@ -232,18 +232,19 @@ runDetectCycles = do
 
 -- No CLI for now; script prints sample module paths between two hardcoded directories
 
--- | Convenience wrapper to run a module rename end-to-end with two local vars.
--- It builds the program index from the given source roots, constructs a
--- SourceEdit using `renameModule`, and then applies it with `applySourceEdit`.
+-- | Convenience wrapper to run module renames end-to-end with a list of tuples.
+-- It builds the program index from the given source roots, constructs
+-- SourceEdits using `renameModule` for each rename, and then applies the
+-- combined result with `applySourceEdit`.
 --
--- Local variables to adjust:
---   - oldModuleName: fully-qualified old module name
---   - newModuleName: fully-qualified new module name
+-- Local variable to adjust:
+--   - moduleRenames: list of (fromModule, toModule) tuples
 runRenameModule :: IO ()
 runRenameModule = do
-  -- Adjust these two local variables
-  let oldModuleName = "Mercury.Risk.InformationRequests.Types.Asks"
-      newModuleName = "Mercury.Risk.InformationRequests.Core.Types.Asks"
+  -- Adjust this list of (fromModule, toModule) tuples
+  let moduleRenames = 
+        [("Tasks.ChoiceRedshiftExport.Types","Tasks.ChoiceRedshiftExport.Types.Core")
+        ]
 
   -- Discover modules under these source roots
   let sourceRoots = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
@@ -256,17 +257,19 @@ runRenameModule = do
     pure (modText, prg)
   let programIndex = Map.fromList prgPairs
 
-  -- Parse names and compute SourceEdit
-  let oldMod = parseModuleTextFromText oldModuleName
-      newMod = parseModuleTextFromText newModuleName
   -- Resolve base paths: old base is the current repo root; new base can be same or different
   oldBaseAbs <- Dir.getCurrentDirectory
-  newBaseAbs <- Dir.makeAbsolute (head sourceRoots)
-  let se = renameModule programIndex modFileMap oldBaseAbs newBaseAbs oldMod newMod
+  newBaseAbs <- Dir.makeAbsolute (fromMaybe "." (listToMaybe sourceRoots))
 
-  -- Apply: this will write file edits and move files, creating directories
-  -- as needed (see Arborist.Rewrite.applySourceEdit)
-  applySourceEdit se
+  -- Process each rename operation and combine SourceEdits
+  sourceEdits <- forM moduleRenames $ \(oldModuleName, newModuleName) -> do
+    let oldMod = parseModuleTextFromText oldModuleName
+        newMod = parseModuleTextFromText newModuleName
+    pure $ renameModule programIndex modFileMap oldBaseAbs newBaseAbs oldMod newMod
+
+  -- Combine all SourceEdits and apply
+  let combinedSourceEdit = mconcat sourceEdits
+  applySourceEdit combinedSourceEdit
 
 -- | Convenience wrapper mirroring runRenameModule's style to exercise pruneEdges
 -- Adjust the local variables to your scenario, then run to apply the rename.
@@ -310,7 +313,7 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
 
   -- Resolve bases: old base is current repo root; new base defaults to first source root
   oldBaseAbs <- Dir.getCurrentDirectory
-  newBaseAbs <- Dir.makeAbsolute (head sourceRoots)
+  newBaseAbs <- Dir.makeAbsolute (fromMaybe "." (listToMaybe sourceRoots))
 
   let normalizeDir :: FilePath -> FilePath
       normalizeDir = FP.normalise . FP.dropTrailingPathSeparator
@@ -326,7 +329,7 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
   case pickCandidate of
     Nothing -> do
       -- Fallback: if nothing matches, act on the last module in the path
-      let oldMod = last mods
+      let oldMod = fromMaybe (error "No modules in path") (listToMaybe (reverse mods))
       pure (renameIntoNewDir programIndex modFileMap oldBaseAbs newBaseAbs newDir oldMod)
     Just oldMod -> pure (renameIntoNewDir programIndex modFileMap oldBaseAbs newBaseAbs newDir oldMod)
 
@@ -338,7 +341,7 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
         leafName =
           case T.splitOn (T.pack ".") mOld.text of
             [] -> T.unpack mOld.text
-            xs -> T.unpack (last xs)
+            xs -> T.unpack (fromMaybe "" (listToMaybe (reverse xs)))
 
         desiredNewDir' :: String
         desiredNewDir' = case reverse desiredNewDir of
@@ -351,4 +354,81 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
         oldMod = mOld
         newMod = parseModuleTextFromText newModNameStr
      in renameModule prgIndex modMap oldBase newBase oldMod newMod
+
+-- | Rename all modules that match a given prefix to a new prefix
+-- This function finds all modules in the program index that start with the old prefix
+-- and renames them to use the new prefix instead, preserving the suffix.
+--
+-- For example, if oldPrefix is "Mercury.FakeData" and newPrefix is "My.New.Module",
+-- then "Mercury.FakeData.Core" becomes "My.New.Module.Core"
+--
+-- This returns a SourceEdit; the caller may apply it with applySourceEdit.
+renameModulePrefix :: ProgramIndex -> ModFileMap -> FilePath -> FilePath -> String -> String -> SourceEdit
+renameModulePrefix prgIndex modMap oldBaseAbs newBaseAbs oldPrefix newPrefix =
+  let
+      -- Normalize prefixes to handle trailing dots
+      normalizePrefix :: String -> String
+      normalizePrefix = reverse . dropWhile (== '.') . reverse
+
+      oldPrefix' = normalizePrefix oldPrefix
+      newPrefix' = normalizePrefix newPrefix
+
+      -- Find all modules that start with the old prefix (including exact matches)
+      matchingModules :: [Hir.ModuleText]
+      matchingModules = 
+        let oldPrefixText = T.pack oldPrefix'
+         in [ modText | modText <- Map.keys prgIndex
+             , T.isPrefixOf oldPrefixText modText.text
+             ]
+
+      -- For each matching module, create a rename operation
+      renameOperations :: [SourceEdit]
+      renameOperations = 
+        [ let
+              -- Extract the suffix (everything after the old prefix)
+              suffix = T.drop (T.length (T.pack oldPrefix')) modText.text
+              -- Remove leading dot if present (handle empty suffix case)
+              suffix' = if T.null suffix 
+                        then suffix  -- Empty suffix, no leading dot to remove
+                        else if maybe False (== '.') (listToMaybe (T.unpack suffix)) then T.tail suffix else suffix
+              -- Construct new module name
+              newModNameStr = if T.null suffix' 
+                             then T.pack newPrefix'
+                             else T.pack newPrefix' <> T.pack "." <> suffix'
+              newMod = parseModuleTextFromText newModNameStr
+           in renameModule prgIndex modMap oldBaseAbs newBaseAbs modText newMod
+        | modText <- matchingModules
+        ]
+
+   in mconcat renameOperations
+
+-- | Convenience wrapper to rename all modules matching a prefix to a new prefix
+-- Adjust the local variables to your scenario, then run to apply the renames.
+--
+-- Local variables to adjust:
+--   - sourceRoots: list of source directories to scan
+--   - oldPrefix: the prefix to match (e.g., "Mercury.FakeData")
+--   - newPrefix: the new prefix to use (e.g., "My.New.Module")
+runRenameModulePrefix :: IO ()
+runRenameModulePrefix = do
+  -- Adjust these local variables
+  let sourceRoots = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
+      oldPrefix = "Mobile.TwoFactorAuth.AuthCode"
+      newPrefix = "Mobile.TwoFactorAuth.Core.AuthCode"
+
+  -- Build a ProgramIndex sufficient for renameModule
+  modFileMap <- buildModuleFileMap sourceRoots
+  -- Seed the index by parsing all known modules (best-effort)
+  prgPairs <- forM (Map.toList modFileMap) $ \(modText, file) -> do
+    prg <- parseProgramFromFile file
+    pure (modText, prg)
+  let programIndex = Map.fromList prgPairs
+
+  -- Resolve base paths: old base is the current repo root; new base can be same or different
+  oldBaseAbs <- Dir.getCurrentDirectory
+  newBaseAbs <- Dir.makeAbsolute (fromMaybe "." (listToMaybe sourceRoots))
+
+  -- Create SourceEdit for prefix rename and apply
+  let sourceEdit = renameModulePrefix programIndex modFileMap oldBaseAbs newBaseAbs oldPrefix newPrefix
+  applySourceEdit sourceEdit
 
