@@ -9,6 +9,7 @@ github: josephsumabat/haskell-arborist
 license: MIT
 version: 0.1.0
 build-type: Simple
+language: GHC2021
 extra-source-files:
   - CHANGELOG.md
   - README.md
@@ -32,6 +33,7 @@ dependencies:
   - pretty-simple
   - text
   - text-range
+  - text-rope >= 0.3 && < 0.4
   - tree-sitter-ast
   - tree-sitter-haskell
   - tree-sitter-simple
@@ -40,27 +42,31 @@ dependencies:
   - nonempty-containers
   - unordered-containers >= 0.2 && < 0.3
   - safe
+  - regex-tdfa
+  - raw-strings-qq
 
 
 default-extensions:
-- FlexibleContexts
 - BangPatterns
+- DataKinds
+- DeriveGeneric
+- DuplicateRecordFields
+- EmptyCase
+- FlexibleContexts
+- ImportQualifiedPost
+- LambdaCase
+- NamedFieldPuns
+- NoFieldSelectors
 - OverloadedRecordDot
 - OverloadedStrings
-- NoFieldSelectors
-- LambdaCase
-- DuplicateRecordFields
-- TypeApplications
-- TypeOperators
-- ImportQualifiedPost
 - PatternSynonyms
-- NamedFieldPuns
-- DeriveGeneric
 - RankNTypes
 - ScopedTypeVariables
-- DataKinds
-- EmptyCase
 - TupleSections
+- TypeAbstractions
+- TypeApplications
+- TypeOperators
+- ViewPatterns
 
 ghc-options:
   - -Wall

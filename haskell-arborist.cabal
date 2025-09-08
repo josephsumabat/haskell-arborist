@@ -84,12 +84,10 @@ library
       src
   default-extensions:
       BangPatterns
-      BlockArguments
       DataKinds
       DeriveGeneric
       DuplicateRecordFields
       EmptyCase
-      ExplicitNamespaces
       FlexibleContexts
       ImportQualifiedPost
       LambdaCase
@@ -101,6 +99,7 @@ library
       RankNTypes
       ScopedTypeVariables
       TupleSections
+      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
@@ -128,7 +127,7 @@ library
     , safe
     , text
     , text-range
-    , text-rope
+    , text-rope ==0.3.*
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
@@ -149,12 +148,10 @@ executable haskell-arborist
       app
   default-extensions:
       BangPatterns
-      BlockArguments
       DataKinds
       DeriveGeneric
       DuplicateRecordFields
       EmptyCase
-      ExplicitNamespaces
       FlexibleContexts
       ImportQualifiedPost
       LambdaCase
@@ -166,6 +163,7 @@ executable haskell-arborist
       RankNTypes
       ScopedTypeVariables
       TupleSections
+      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
@@ -194,7 +192,7 @@ executable haskell-arborist
     , safe
     , text
     , text-range
-    , text-rope
+    , text-rope ==0.3.*
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
@@ -224,12 +222,10 @@ test-suite haskell-arborist-test
       test
   default-extensions:
       BangPatterns
-      BlockArguments
       DataKinds
       DeriveGeneric
       DuplicateRecordFields
       EmptyCase
-      ExplicitNamespaces
       FlexibleContexts
       ImportQualifiedPost
       LambdaCase
@@ -241,6 +237,7 @@ test-suite haskell-arborist-test
       RankNTypes
       ScopedTypeVariables
       TupleSections
+      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
@@ -271,7 +268,7 @@ test-suite haskell-arborist-test
     , safe
     , text
     , text-range
-    , text-rope
+    , text-rope ==0.3.*
     , time
     , tree-sitter-ast
     , tree-sitter-haskell
