@@ -111,7 +111,7 @@ fixNotInScope = do
             , code = Just "GHC-76037"
             , codeUri = Nothing
             }
-    maybeEdit <- mkInsertionInfo dummyDiagnostic
+    maybeEdit <- mkInsertionInfo dummyDiagnostic "Model.Callsign"
     case maybeEdit of
       Just (_, edit) ->
         let existingEdits = Map.findWithDefault [] filePath acc
@@ -172,12 +172,12 @@ applyFixes fixes = do
 runAllFixes :: IO ()
 runAllFixes = do
   redundantFixes <- fixRedundantImports
-  --notInScopeFixes <- fixNotInScope
+  notInScopeFixes <- fixNotInScope
   notExportedFixes <- fixNotExported
 
   -- Combine all fixes
   --let allFixes = Map.unionWith (++) redundantFixes (Map.unionWith (++) notInScopeFixes notExportedFixes)
-  let allFixes = notExportedFixes `combine` redundantFixes
+  let allFixes = notExportedFixes `combine` redundantFixes `combine` notInScopeFixes
 
   putStrLn $ "Combined fixes: " ++ show (Map.size allFixes) ++ " files with edits"
   applyFixes allFixes
@@ -300,8 +300,8 @@ mkNotExportedDeletionInfo diagnostic = do
   putStrLn $ "Created deletion edit for " ++ absFilePath
   pure $ Just (absFilePath, deletionEdit)
 
-mkInsertionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))
-mkInsertionInfo diagnostic = do
+mkInsertionInfo :: Diagnostic -> Text.Text -> IO (Maybe (FilePath, Edit))
+mkInsertionInfo diagnostic modImport = do
   let FileWith filePath range = diagnostic.range
   let absFilePath = Path.toFilePath filePath
   -- Debug: print the diagnostic range
@@ -315,7 +315,7 @@ mkInsertionInfo diagnostic = do
     Just pos -> do
       putStrLn $ "Found first import at position: " ++ show pos
       -- Create an insertion edit with a sample import statement
-      let importStatement = "import TestImport.Import.NoFoundation\n"
+      let importStatement = "import " <> modImport <> "\n"
       let insertionEdit = Edit.insert pos importStatement
       putStrLn $ "Created import insertion edit for " ++ absFilePath
       pure $ Just (absFilePath, insertionEdit)

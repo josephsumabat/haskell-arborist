@@ -25,7 +25,7 @@ spec = do
       baseDir <- Dir.getCurrentDirectory
       let oldMod = parseModuleTextFromText "StaticLS.IDE.SourceEdit"
           newMod = parseModuleTextFromText "StaticLS.IDE.Refactored.SourceEdit"
-          se@SourceEdit{fileEdits, fsEdits} = renameModule prgs modFileMap baseDir oldMod newMod
+          se@SourceEdit{fileEdits, fsEdits} = renameModule prgs modFileMap baseDir baseDir oldMod newMod
 
       -- It should include at least one file edit and a move
       HashMap.size fileEdits `shouldSatisfy` (> 0)

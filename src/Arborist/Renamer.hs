@@ -272,8 +272,8 @@ renamePrg availPrgs exportIdx prg =
           (x : xs) -> AmbiguousGlobalVar (x NE.:| xs)
 
   getValidGlobalVarInfos :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> [GlblVarInfo]
-  getValidGlobalVarInfos renamerEnv currScope varName qualifier =
-    case Map.lookup varName (currScope.glblVarInfo) of
+  getValidGlobalVarInfos renamerEnv currScope varName qualifier = 
+    case Map.lookup varName currScope.glblVarInfo of
       Nothing -> []
       Just impVarMap ->
         case qualifier of

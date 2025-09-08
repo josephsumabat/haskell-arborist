@@ -44,7 +44,7 @@ getAliasModMap prg =
 getNameExportInfo :: [GlblDeclInfo] -> [Hir.ExportItem] -> [GlblDeclInfo]
 getNameExportInfo availNames exports =
   let exportSet = getSearchableExportSet exports
-   in filter (\info -> any (`Set.member` exportSet) (lookupKeys info)) availNames
+   in filter (\info -> (not info.hiddenByImports) && any (`Set.member` exportSet) (lookupKeys info)) availNames
  where
   -- Try both unqualified and qualified keys if unqualified is allowed
   lookupKeys :: GlblDeclInfo -> [(T.Text, Maybe ModuleText)]

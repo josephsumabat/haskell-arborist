@@ -55,6 +55,7 @@ exportToInfo importedFrom qualified expName =
     , originatingMod = expName.mod
     , importedFrom = importedFrom
     , requiresQualifier = qualified
+    , hiddenByImports = False
     }
 
 infoToExport :: GlblDeclInfo -> ExportedDecl
@@ -95,7 +96,17 @@ getImportDecls' prgIndex exportIndex inProgress thisImport =
       alias = fromMaybe thisImport.mod thisImport.alias
       (exportedNames, updatedExportIndex) = getExportedDecls' prgIndex exportIndex inProgress mod
       importInfo = ImportInfo {mod = mod, namespace = alias}
-      glblNameInfo = exportToInfo importInfo qualified <$> exportedNames
+      glblNameInfoPre = exportToInfo importInfo qualified <$> exportedNames
+      glblNameInfo =
+        case thisImport.importList of
+          Nothing -> glblNameInfoPre
+          Just items ->
+            let importNames = Set.fromList $ (.nameText) . (.name) <$> items
+                markHidden info =
+                  let isInList = Set.member info.name importNames
+                      hide = if thisImport.hiding then isInList else not isInList
+                   in info {hiddenByImports = hide}
+             in fmap markHidden glblNameInfoPre
    in (glblNameInfo, updatedExportIndex)
 
 getManyImportDecls' ::
@@ -171,6 +182,7 @@ getExportedDecls' prgIndex exportIndex inProgress modName
                   ( \expInfo ->
                       (expInfo.importedFrom.namespace `Set.member` reExportedAliasesSet)
                         && (not expInfo.requiresQualifier)
+                        && (not expInfo.hiddenByImports)
                   )
                   allAvailableNames
 
@@ -242,8 +254,8 @@ globalDeclsToScope availDecl imports =
   isHidden :: [Hir.Read.Import] -> GlblDeclInfo -> Bool
   isHidden imps declInfo =
     case findMatchingImport imps declInfo of
-      Nothing -> False
-      Just imp -> shouldBeHidden imp declInfo
+      Nothing -> declInfo.hiddenByImports
+      Just imp -> shouldBeHidden imp declInfo || declInfo.hiddenByImports
 
   findMatchingImport :: [Hir.Read.Import] -> GlblDeclInfo -> Maybe Hir.Read.Import
   findMatchingImport imps declInfo = List.find (\imp -> imp.mod == declInfo.importedFrom.mod) imps

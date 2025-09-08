@@ -216,6 +216,7 @@ test-suite haskell-arborist-test
       Arborist.HirSpec
       Arborist.ProgramIndexSpec
       Arborist.Refactor.ModuleSpec
+      Arborist.TransitiveReexportSpec
       TestImport
       Paths_haskell_arborist
   hs-source-dirs:

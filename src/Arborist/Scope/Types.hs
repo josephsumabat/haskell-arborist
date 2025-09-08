@@ -21,6 +21,7 @@ data GlblDeclInfo = GlblDeclInfo
   , originatingMod :: ModuleText
   , importedFrom :: ImportInfo
   , requiresQualifier :: Bool
+  , hiddenByImports :: Bool
   }
   deriving (Show, Eq)
 

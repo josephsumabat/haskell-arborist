@@ -185,7 +185,7 @@ spec = describe "renderImport" $ do
             , importList = Just [importItem1, importItem2, importItem3, importItem4]
             , dynNode = ()
             }
-      Render.renderImport imp `shouldBe` "import Data.Text (Text, (++), String (Child), Data (..))"
+      Render.renderImport imp `shouldBe` "import Data.Text (\n    Text,\n    (++),\n    String (Child),\n    Data (..)\n  )"
 
   describe "complex imports" $ do
     it "renders qualified import with alias and hiding" $ do
