@@ -41,11 +41,19 @@ import System.IO
 import Text.Pretty.Simple
 import UnliftIO (mapConcurrently)
 import Scripts.DirCycles
+import Arborist.Reexports
+import Diagnostics.Fixes
 
 main :: IO ()
 main = do
   -- runDetectCycles
-  -- runRenameModule
+  --runReplaceReexports
+  --runAllFixes
+  --runRenameModule
+  --runRenameModulePrefix
+  runDeleteEmptyImports
+  runDeleteEmptyHidingImports
+  --old
   pure ()
 
 old =
@@ -430,7 +438,7 @@ old =
             [String]
     modFileMap <- buildModuleFileMap srcWithLps
     let onlySrc = ["../mercury-web-backend/src"]
-    let targetMod = parseModuleTextFromText "Handler.Expenses.Search.Sql"
+    let targetMod = parseModuleTextFromText "Client.Bank.Sql"
         targetFile = maybe [] List.singleton (Map.lookup targetMod modFileMap)
     let src = srcWithLps
 

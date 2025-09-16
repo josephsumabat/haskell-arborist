@@ -23,6 +23,7 @@ import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
+import Data.Text.Read qualified as T.Read
 import Diagnostics (Diagnostic (..), Severity (..))
 import Diagnostics.ParseGHC qualified as Diagnostics
 import FileWith (FileWith' (..))
@@ -33,6 +34,15 @@ import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
 import Hir.Write.Types qualified as Hir.Write
 import System.FilePath ((</>))
+
+-- local helpers copied from Diagnostics.ParseGHC
+readInt :: T.Text -> Maybe Int
+readInt t = case T.Read.decimal t of
+  Right (i, "") -> Just i
+  _ -> Nothing
+
+dec :: Int -> Int
+dec x = max 0 (x - 1)
 
 fixRedundantImports :: IO (Map.HashMap Path.AbsPath [Edit])
 fixRedundantImports = do
@@ -83,11 +93,14 @@ fixNotInScope = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isNotInScopeDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-in-scope diagnostics"
-  -- Track processed files to avoid adding multiple imports to the same file
-  processedFiles <- forM relevantDiagnostics $ \d -> do
-    let FileWith filePath _ = d.range
-    pure filePath
-  let uniqueFiles = Set.fromList processedFiles
+  
+  -- Deduplicate diagnostics based on file path, range, and message
+  let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
+  putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique not-in-scope diagnostics"
+
+  -- Collect unique files from deduplicated diagnostics
+  let uniqueFiles = Set.fromList [ filePath | Diagnostic{range = FileWith filePath _} <- deduplicatedDiagnostics ]
+
   -- Process each unique file and collect edits in a Map
   editsMap <- foldM collectImportEdit Map.empty (Set.toList uniqueFiles)
   -- Debug: show what edits are being collected
@@ -99,10 +112,17 @@ fixNotInScope = do
   putStrLn $ "Processed " ++ show (Set.size uniqueFiles) ++ " files with not-in-scope diagnostics"
   pure editsMap
  where
+  -- Local list of imports to insert (deduplicated before insertion)
+  importsToInsert :: [Text.Text]
+  importsToInsert =
+    [
+      "A.MercuryTestPrelude"
+    ]
+
   collectImportEdit :: Map.HashMap Path.AbsPath [Edit] -> Path.AbsPath -> IO (Map.HashMap Path.AbsPath [Edit])
   collectImportEdit acc filePath = do
     putStrLn $ "Creating import edit for " ++ Path.toFilePath filePath
-    -- Create a dummy diagnostic for the file to reuse mkInsertionInfo
+    -- Create a dummy diagnostic for the file for consistent logging
     let dummyDiagnostic =
           Diagnostic
             { range = FileWith filePath (LineColRange (LineCol (Pos 1) (Pos 1)) (LineCol (Pos 1) (Pos 1)))
@@ -111,13 +131,40 @@ fixNotInScope = do
             , code = Just "GHC-76037"
             , codeUri = Nothing
             }
-    maybeEdit <- mkInsertionInfo dummyDiagnostic "Model.Callsign"
-    case maybeEdit of
-      Just (_, edit) ->
-        let existingEdits = Map.findWithDefault [] filePath acc
-         in pure $ Map.insert filePath (edit : existingEdits) acc
-      Nothing ->
+
+    -- Read the file content and parse it to determine insertion point and existing imports
+    let absFilePath = Path.toFilePath filePath
+    fileContent <- TextIO.readFile absFilePath
+    let (_, program) = parsePrg fileContent
+        imports = program.imports
+        existingMods = Set.fromList (map (\imp -> imp.mod.text) imports)
+        uniqueImports = Set.toList (Set.fromList importsToInsert)
+        missingImports = filter (\impName -> not (impName `Set.member` existingMods)) uniqueImports
+    case imports of
+      [] -> do
+        -- No imports found; skip to avoid placing imports in the wrong location
+        putStrLn $ "No import statements found in " ++ absFilePath ++ ", skipping"
         pure acc
+      _ -> do
+        -- Find position after the last import
+        let pickLast a b = if a.dynNode.nodeRange.end.pos >= b.dynNode.nodeRange.end.pos then a else b
+            lastImport = foldl1 pickLast imports
+            pos = lastImport.dynNode.nodeRange.end
+        if null missingImports
+          then do
+            putStrLn $ "All desired imports already present in " ++ absFilePath ++ "; skipping insertion"
+            pure acc
+          else do
+            -- Prepare insertion text, ensuring a leading newline if needed
+            let lastEndPos = pos.pos
+                beforeChar = if lastEndPos > 0 then T.take 1 (T.drop (lastEndPos - 1) fileContent) else T.empty
+                prefix = if beforeChar == T.singleton '\n' then T.empty else T.singleton '\n'
+                importLines = (\imp -> "import " <> imp) <$> missingImports
+                insertionText = prefix <> Text.unlines importLines
+                insertionEdit = Edit.insert pos insertionText
+            putStrLn $ "Created import insertion edit after last import for " ++ absFilePath
+            let existingEdits = Map.findWithDefault [] filePath acc
+            pure $ Map.insert filePath (insertionEdit : existingEdits) acc
 
 fixNotExported :: IO (Map.HashMap Path.AbsPath [Edit])
 fixNotExported = do
@@ -157,6 +204,136 @@ fixNotExported = do
       Nothing ->
         pure acc
 
+-- | Parse the Nth (0-based) imported-from location from an ambiguous occurrence diagnostic message
+parseImportedFromAtIndex :: Int -> T.Text -> Maybe (FilePath, LineColRange)
+parseImportedFromAtIndex idx message =
+  let lines = T.lines message
+      importedLines = filter (T.isInfixOf "imported from") lines
+   in case drop idx importedLines of
+        (line:_) ->
+          let afterAtWithPrefix = snd (T.breakOn " at " line)
+           in if T.isPrefixOf " at " afterAtWithPrefix
+                then
+                  let afterAt = T.drop 4 afterAtWithPrefix
+                      trimmed = T.dropWhileEnd (\c -> c == '.' || c == ' ') afterAt
+                      (filePart, rest1) = T.breakOn ":" trimmed
+                      rest = T.drop 1 rest1
+                      (lineStr, rest2) = T.breakOn ":" rest
+                      restCols = T.drop 1 rest2
+                      (col1Str, col2StrWithDash) = T.breakOn "-" restCols
+                      col2Str = T.drop 1 col2StrWithDash
+                   in case (readInt lineStr, readInt col1Str, readInt col2Str) of
+                        (Just lineNum1, Just col1Num1, Just col2Num) ->
+                          let lineNum = dec lineNum1
+                              col1Num = dec col1Num1
+                              lcr = LineColRange (LineCol (Pos lineNum) (Pos col1Num)) (LineCol (Pos lineNum) (Pos col2Num))
+                           in Just (T.unpack filePart, lcr)
+                        _ -> Nothing
+                else Nothing
+        _ -> Nothing
+
+-- | Extract the ambiguous symbol name from the diagnostic message
+parseAmbiguousSymbol :: T.Text -> Maybe T.Text
+parseAmbiguousSymbol message =
+  let (_, rest) = T.breakOn "Ambiguous occurrence ‘" message
+   in if T.null rest
+        then Nothing
+        else
+          let after = T.drop (T.length "Ambiguous occurrence ‘") rest
+              (sym, _) = T.breakOn "’" after
+           in if T.null sym then Nothing else Just sym
+
+-- | Build an ImportItem for a given value name
+mkValueImportItem :: T.Text -> Hir.Write.ImportItem
+mkValueImportItem nameText =
+  let nm =
+        Hir.Name
+          { nameText = nameText
+          , isOperator = False
+          , isConstructor = False
+          , dynNode = ()
+          }
+   in Hir.ImportItem
+        { namespace = Hir.NameSpaceValue
+        , name = nm
+        , children = []
+        }
+
+-- | Update a write-import to hide the given symbol, or remove it if using include list
+hideSymbolInImport :: Hir.Write.Import -> T.Text -> Hir.Write.Import
+hideSymbolInImport wimp sym =
+  let item = mkValueImportItem sym
+   in case (wimp.hiding, wimp.importList) of
+        (True, Nothing) ->
+          Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = () }
+        (True, Just items) ->
+          let exists i = i.name.nameText == sym
+              items' = if any exists items then items else items ++ [item]
+           in Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just items', dynNode = () }
+        (False, Nothing) ->
+          Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = () }
+        (False, Just items) ->
+          let keep i = i.name.nameText /= sym
+              items' = filter keep items
+           in Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = False, importList = Just items', dynNode = () }
+
+-- | Construct a rewrite edit that hides the ambiguous symbol on the selected import (by index)
+mkAmbiguousImportHidingEdit :: Int -> Diagnostic -> IO (Maybe (FilePath, Range, Edit))
+mkAmbiguousImportHidingEdit whichIdx diagnostic = do
+  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+  case (parseImportedFromAtIndex whichIdx diagnostic.message, parseAmbiguousSymbol diagnostic.message) of
+    (Just (relFile, lineColRange), Just sym) -> do
+      let absFilePath = root System.FilePath.</> relFile
+      fileContent <- TextIO.readFile absFilePath
+      let rope = Rope.fromText fileContent
+          targetRange = Rope.lineColRangeToRange rope lineColRange
+          (_, program) = parsePrg fileContent
+          imports = program.imports
+          contains r1 r2 = r1.start.pos <= r2.start.pos && r1.end.pos >= r2.end.pos
+          matched = [ imp | imp <- imports, contains imp.dynNode.nodeRange targetRange ]
+      case matched of
+        (imp:_) -> do
+          let wimp = Render.fromReadImport imp
+              updated = hideSymbolInImport wimp sym
+              newText = Render.renderImport updated
+              rng = imp.dynNode.nodeRange
+              edit = rewriteNode imp.dynNode newText
+          pure $ Just (absFilePath, rng, edit)
+        _ -> pure Nothing
+    _ -> pure Nothing
+
+-- | Fix ambiguous occurrence diagnostics by adding hiding to the second import
+fixAmbiguousImports :: IO (Map.HashMap Path.AbsPath [Edit])
+fixAmbiguousImports = do
+  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
+  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
+  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+  putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
+  forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
+  let relevantDiagnostics = filter isAmbiguousImportDiagnostic diagnostics
+  putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " ambiguous import diagnostics"
+  let hideSecond = False -- set to False to hide the first import instead
+      whichIdx = if hideSecond then 1 else 0
+  triplesMap <- foldM (collectTriple whichIdx) Map.empty relevantDiagnostics
+  let editsMap = fmap (map snd) triplesMap
+  putStrLn $ "Total files with edits (ambiguous): " ++ show (Map.size editsMap)
+  forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
+    putStrLn $ "Collected " ++ show (length edits) ++ " ambiguous edits for " ++ Path.toFilePath filePath
+  pure editsMap
+ where
+  collectTriple :: Int -> Map.HashMap Path.AbsPath [(Range, Edit)] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [(Range, Edit)])
+  collectTriple whichIdx acc diagnostic = do
+    maybeInfo <- mkAmbiguousImportHidingEdit whichIdx diagnostic
+    case maybeInfo of
+      Just (filePath, rng, edit) -> do
+        let absPath = Path.unsafeFilePathToAbs filePath
+            existing = Map.findWithDefault [] absPath acc
+            already = any (\(r, _) -> r == rng) existing
+            newList = if already then existing else (rng, edit) : existing
+        pure $ Map.insert absPath newList acc
+      Nothing -> pure acc
+
 -- | Apply the collected fixes to the filesystem
 applyFixes :: Map.HashMap Path.AbsPath [Edit] -> IO ()
 applyFixes fixes = do
@@ -174,10 +351,12 @@ runAllFixes = do
   redundantFixes <- fixRedundantImports
   notInScopeFixes <- fixNotInScope
   notExportedFixes <- fixNotExported
+  ambiguousFixes <- fixAmbiguousImports
 
   -- Combine all fixes
-  --let allFixes = Map.unionWith (++) redundantFixes (Map.unionWith (++) notInScopeFixes notExportedFixes)
-  let allFixes = notExportedFixes `combine` redundantFixes `combine` notInScopeFixes
+  let 
+      allFixes = notExportedFixes `combine` redundantFixes `combine` ambiguousFixes `combine` notInScopeFixes
+      --allFixes = ambiguousFixes
 
   putStrLn $ "Combined fixes: " ++ show (Map.size allFixes) ++ " files with edits"
   applyFixes allFixes
@@ -200,31 +379,26 @@ replaceModImports prg targetMod modsToAdd reexportIdentifiers =
    in (\foundImport -> replaceImport foundImport modsToAdd reexportIdentifiers) <$> foundImports
 
 toNewImport :: Hir.Write.Import -> Hir.ModuleText -> Set.Set Text.Text -> [Hir.Write.Import]
-toNewImport orig newMod reexportIdentifiers =
+toNewImport orig newMod _reexportIdentifiers =
   let alias = orig.alias
-      importList = filter (\importItem -> Set.member importItem.name.nameText reexportIdentifiers) <$> orig.importList
-      hiding =
-        case importList of
-          Nothing -> False
-          Just [] -> False
-          Just _xs -> orig.hiding
       qualified = orig.qualified
-   in [ orig
-      , Hir.Import
-          { mod = newMod
-          , qualified
-          , alias
-          , hiding = orig.hiding
-          , importList = orig.importList
-          , dynNode = ()
-          }
+   in [ Hir.Import
+        { mod = newMod
+        , qualified
+        , alias
+        , hiding = orig.hiding
+        , importList = orig.importList
+        , dynNode = ()
+        }
       ]
 
 replaceImport :: Hir.Read.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
 replaceImport imp mods reexportIdentifiers =
   let dynNode = imp.dynNode
       renderImp = Render.fromReadImport imp
-      newText = Text.unlines $ Render.renderImport <$> (((\mod -> (toNewImport renderImp mod reexportIdentifiers)) =<< mods))
+      newImports = ((\mod -> (toNewImport renderImp mod reexportIdentifiers)) =<< mods)
+      finalImports = renderImp : newImports
+      newText = Text.unlines $ Render.renderImport <$> finalImports
    in rewriteNode dynNode newText
 
 -- | Check if a diagnostic is about a redundant import
@@ -240,6 +414,10 @@ isNotInScopeDiagnostic diagnostic =
 isNotExportedDiagnostic :: Diagnostic -> Bool
 isNotExportedDiagnostic diagnostic =
   diagnostic.code == Just "GHC-61689"
+
+isAmbiguousImportDiagnostic :: Diagnostic -> Bool
+isAmbiguousImportDiagnostic diagnostic =
+  diagnostic.code == Just "GHC-87543"
 
 -- | Convert a diagnostic to a deletion edit that removes the redundant import line
 mkDeletionInfo :: Diagnostic -> IO (Maybe (FilePath, Edit))

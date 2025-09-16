@@ -144,9 +144,9 @@ data Import s = Import
 deriving instance (HirDynNode s) => Show (Import s)
 deriving instance (HirDynNode s) => Eq (Import s)
 
--- pattern OpenImport :: ModuleText -> AST.DynNode -> (Import Read)
--- pattern OpenImport mod dynNode = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing, dynNode}
---
+pattern OpenImport :: ModuleText -> DynNode -> (Import HirRead)
+pattern OpenImport mod dynNode = Import {mod, alias = Nothing, qualified = False, hiding = False, importList = Nothing, dynNode}
+
 type ParseNameTypes =
   Haskell.NameP
     :+ Haskell.ConstructorP

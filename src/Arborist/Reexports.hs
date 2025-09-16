@@ -54,22 +54,47 @@ exportItemMods exports =
 runReplaceReexports :: IO ()
 runReplaceReexports = do
   let targetReexporting = parseModuleTextFromText "TestImport"
-  let reexport = parseModuleTextFromText "PersistentModels.MercuryAccount"
+  let reexports = parseModuleTextFromText <$>
+        [
+        "Data.Either",
+
+        "Data.Maybe",
+
+        "Model.Email",
+
+        "Mercury.Database.Monad",
+        "HspecExtensions",
+
+        "Stubs.Stubs",
+        "Stubs.Stubs.S3",
+        "Model.Country",
+        "Mercury.PersistentUtils",
+        "PersistentModels.MercuryAccount",
+        "PersistentModels.Organization",
+        "Users.PersistentModels.User"
+        ]
+
   let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc
-  let reexportPrg = fromJust (Map.lookup reexport srcPrgs)
+  let reexportPrgs = mapMaybe (\m -> Map.lookup m srcPrgs) reexports
   let importingModules = findImportingModules srcPrgs targetReexporting
-  let glblAvail = getGlobalAvailableDecls srcPrgs Map.empty (fromJust $ Map.lookup reexport srcPrgs)
-  let reexportScope = globalDeclsToScope glblAvail reexportPrg.imports
   let reexportIdentifiers =
-        Set.fromList $
-          Map.keys reexportScope.glblVarInfo
-            <> Map.keys reexportScope.glblNameInfo
-            <> Map.keys reexportScope.glblConstructorInfo
-  putStrLn $ TL.unpack . pShowNoColor $ globalDeclsToScope glblAvail reexportPrg.imports
-  let edits = replaceReexporters srcPrgs importingModules targetReexporting [reexport] reexportIdentifiers
+        Set.unions $
+          flip map reexportPrgs $ \reexportPrg ->
+            let glblAvail = getGlobalAvailableDecls srcPrgs Map.empty reexportPrg
+                reexportScope = globalDeclsToScope glblAvail reexportPrg.imports
+             in Set.fromList $
+                  Map.keys reexportScope.glblVarInfo
+                    <> Map.keys reexportScope.glblNameInfo
+                    <> Map.keys reexportScope.glblConstructorInfo
+  case reexportPrgs of
+    (prg:_) ->
+      let glblAvail = getGlobalAvailableDecls srcPrgs Map.empty prg
+       in putStrLn $ TL.unpack . pShowNoColor $ globalDeclsToScope glblAvail prg.imports
+    _ -> pure ()
+  let edits = replaceReexporters srcPrgs importingModules targetReexporting reexports reexportIdentifiers
       editsWithPaths = mapMaybe (\(mod, e) -> ((\file -> (file, e)) <$> Map.lookup mod modFileMap)) edits
   forM_ editsWithPaths $ \(path, edits) -> writeMultipleEdits path edits
   
