@@ -99,7 +99,6 @@ library
       RankNTypes
       ScopedTypeVariables
       TupleSections
-      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
@@ -163,7 +162,6 @@ executable haskell-arborist
       RankNTypes
       ScopedTypeVariables
       TupleSections
-      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
@@ -238,7 +236,6 @@ test-suite haskell-arborist-test
       RankNTypes
       ScopedTypeVariables
       TupleSections
-      TypeAbstractions
       TypeApplications
       TypeOperators
       ViewPatterns
