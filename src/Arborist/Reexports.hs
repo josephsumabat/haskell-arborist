@@ -5,6 +5,7 @@ module Arborist.Reexports (
   runDeleteEmptyImports,
 ) where
 
+import Data.Text qualified as T
 import Arborist.Files
 import Arborist.ProgramIndex
 import Arborist.Rewrite (rewriteNode)
@@ -17,7 +18,7 @@ import Control.Monad
 import Data.ByteString qualified as BS
 import Data.Edit (Edit, delete)
 import Data.HashMap.Lazy qualified as Map
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (fromJust, mapMaybe, isJust)
 import Data.Set qualified as Set
 import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
@@ -56,22 +57,8 @@ runReplaceReexports = do
   let targetReexporting = parseModuleTextFromText "TestImport"
   let reexports = parseModuleTextFromText <$>
         [
-        "Data.Either",
-
-        "Data.Maybe",
-
-        "Model.Email",
-
-        "Mercury.Database.Monad",
-        "HspecExtensions",
-
-        "Stubs.Stubs",
-        "Stubs.Stubs.S3",
-        "Model.Country",
-        "Mercury.PersistentUtils",
-        "PersistentModels.MercuryAccount",
-        "PersistentModels.Organization",
-        "Users.PersistentModels.User"
+          "TestImport.Stubs",
+          "TestImport.Assertion"
         ]
 
   let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
@@ -130,7 +117,9 @@ findEmptyImports program =
  where
   isEmptyImport :: Hir.Read.Import -> Bool
   isEmptyImport import_ = 
-    import_.mod.text == "A.MercuryTestPrelude" &&
+    ((T.isInfixOf "TestImport.Assertion" import_.mod.text) ||
+    (T.isInfixOf "TestImport.Stubs" import_.mod.text))
+      &&
     (not import_.hiding) && 
     case import_.importList of
       Just [] -> True
@@ -226,7 +215,7 @@ createEmptyImportEdits program =
 
 runDeleteEmptyImports :: IO ()
 runDeleteEmptyImports = do
-  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test", "../mercury-web-backend/local-packages/a-mercury-prelude/src"]
+  let onlySrc = ["../mercury-web-backend/test"]
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc

@@ -14,7 +14,7 @@ import Data.HashMap.Lazy qualified as Map
 import Data.LineCol (LineCol (..))
 import Data.LineColRange (LineColRange (..))
 import Data.List (nubBy, find, findIndex, scanl)
-import Data.Maybe (mapMaybe, listToMaybe)
+import Data.Maybe (mapMaybe, listToMaybe, isJust)
 import Data.Path qualified as Path
 import Data.Pos (Pos (..))
 import Data.Range (Range (..))
@@ -116,7 +116,7 @@ fixNotInScope = do
   importsToInsert :: [Text.Text]
   importsToInsert =
     [
-      "A.MercuryTestPrelude"
+      "Test.Mercury.Assertions"
     ]
 
   collectImportEdit :: Map.HashMap Path.AbsPath [Edit] -> Path.AbsPath -> IO (Map.HashMap Path.AbsPath [Edit])
@@ -385,7 +385,7 @@ toNewImport orig newMod _reexportIdentifiers =
    in [ Hir.Import
         { mod = newMod
         , qualified
-        , alias
+        , alias = if isJust alias then alias else Just orig.mod
         , hiding = orig.hiding
         , importList = orig.importList
         , dynNode = ()

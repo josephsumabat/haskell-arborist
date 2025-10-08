@@ -48,11 +48,11 @@ main :: IO ()
 main = do
   -- runDetectCycles
   --runReplaceReexports
-  --runAllFixes
+  runAllFixes
   --runRenameModule
   --runRenameModulePrefix
-  runDeleteEmptyImports
-  runDeleteEmptyHidingImports
+  --runDeleteEmptyImports
+  --runDeleteEmptyHidingImports
   --old
   pure ()
 

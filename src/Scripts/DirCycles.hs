@@ -243,7 +243,7 @@ runRenameModule :: IO ()
 runRenameModule = do
   -- Adjust this list of (fromModule, toModule) tuples
   let moduleRenames = 
-        [("Tasks.ChoiceRedshiftExport.Types.Core","Tasks.ChoiceRedshiftExport.Types")
+        [("Mercury.BusinessBanking.Onboarding.OnboarderAttribute","Mercury.BusinessBanking.Onboarding.Core.OnboarderAttribute")
         ]
 
   -- Discover modules under these source roots
