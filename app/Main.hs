@@ -1,11 +1,17 @@
 module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
+import BuildGraph.Directory (buildGraphFromDirectories, graphToJson, renderBuildGraphError)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy.Char8 as BL8
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import Diagnostics.Fixes (runAllFixes)
 import Options.Applicative (Parser, ParserInfo)
 import Options.Applicative qualified as Opt
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
 import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
+import System.Exit (die)
 
 data Command
   = DetectCycles
@@ -16,6 +22,11 @@ data Command
   | DeleteEmptyImports
   | DeleteEmptyHidingImports
   | DumpRenamedAst DumpRenamedAstOptions
+  | DumpTargetGraph DumpTargetGraphOptions
+
+data DumpTargetGraphOptions = DumpTargetGraphOptions
+  { srcDirs :: NonEmpty FilePath
+  }
 
 main :: IO ()
 main = Opt.execParser parserInfo >>= runCommand
@@ -30,6 +41,7 @@ runCommand cmd = case cmd of
   DeleteEmptyImports -> runDeleteEmptyImports
   DeleteEmptyHidingImports -> runDeleteEmptyHidingImports
   DumpRenamedAst opts -> runDumpRenamedAst opts
+  DumpTargetGraph opts -> runDumpTargetGraph opts
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -51,6 +63,10 @@ commandParser =
       <> Opt.command "dump-renamed-ast"
         ( Opt.info (DumpRenamedAst <$> dumpRenamedAstOptionsParser)
             (Opt.progDesc "Write the renamed AST for a source file to disk")
+        )
+      <> Opt.command "dump-target-graph"
+        ( Opt.info (DumpTargetGraph <$> dumpTargetGraphOptionsParser)
+            (Opt.progDesc "Emit the maximal acyclic directory target graph as JSON")
         )
       <> Opt.metavar "COMMAND"
   where
@@ -82,3 +98,18 @@ commandParser =
                   <> Opt.help "Override path to the Arborist configuration file"
               )
           )
+
+    dumpTargetGraphOptionsParser :: Parser DumpTargetGraphOptions
+    dumpTargetGraphOptionsParser =
+      fmap (DumpTargetGraphOptions . NE.fromList) . Opt.some $
+        Opt.strArgument
+          ( Opt.metavar "DIRECTORY..."
+              <> Opt.help "Source directory (or directories) containing Haskell modules"
+          )
+
+runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
+runDumpTargetGraph DumpTargetGraphOptions {srcDirs} = do
+  result <- buildGraphFromDirectories (NE.toList srcDirs)
+  case result of
+    Left err -> die (renderBuildGraphError err)
+    Right graph -> BL8.putStrLn (Aeson.encode (graphToJson graph))
