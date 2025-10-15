@@ -1,7 +1,7 @@
 module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
-import BuildGraph.Directory (buildGraphFromDirectories, graphToJson, renderBuildGraphError)
+import BuildGraph.Directory (buildGraphFromDirectories, graphToOutput, renderBuildGraphError)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.List.NonEmpty (NonEmpty)
@@ -25,7 +25,8 @@ data Command
   | DumpTargetGraph DumpTargetGraphOptions
 
 data DumpTargetGraphOptions = DumpTargetGraphOptions
-  { srcDirs :: NonEmpty FilePath
+  { rootDir :: FilePath
+  , srcDirs :: NonEmpty FilePath
   }
 
 main :: IO ()
@@ -101,15 +102,23 @@ commandParser =
 
     dumpTargetGraphOptionsParser :: Parser DumpTargetGraphOptions
     dumpTargetGraphOptionsParser =
-      fmap (DumpTargetGraphOptions . NE.fromList) . Opt.some $
-        Opt.strArgument
-          ( Opt.metavar "DIRECTORY..."
-              <> Opt.help "Source directory (or directories) containing Haskell modules"
+      DumpTargetGraphOptions
+        <$> Opt.strOption
+          ( Opt.long "root"
+              <> Opt.metavar "DIR"
+              <> Opt.help "Root directory containing the listed source directories"
           )
+        <*> (NE.fromList <$> Opt.some
+              ( Opt.strArgument
+                  ( Opt.metavar "DIRECTORY..."
+                      <> Opt.help "Source directory (or directories) containing Haskell modules"
+                  )
+              )
+            )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
-runDumpTargetGraph DumpTargetGraphOptions {srcDirs} = do
-  result <- buildGraphFromDirectories (NE.toList srcDirs)
+runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs} = do
+  result <- buildGraphFromDirectories rootDir (NE.toList srcDirs)
   case result of
     Left err -> die (renderBuildGraphError err)
-    Right graph -> BL8.putStrLn (Aeson.encode (graphToJson graph))
+    Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))

@@ -345,6 +345,21 @@ applyFixes fixes = do
     writeMultipleEdits (Path.toFilePath filePath) edits
   putStrLn "All fixes applied successfully"
 
+-- | Combine fix maps by appending edits for matching paths.
+combineFixMaps :: Map.HashMap Path.AbsPath [Edit] -> Map.HashMap Path.AbsPath [Edit] -> Map.HashMap Path.AbsPath [Edit]
+combineFixMaps = Map.unionWith (++)
+
+-- | Run only the simple fixes that don't require extra configuration.
+runSimpleFixes :: IO ()
+runSimpleFixes = do
+  redundantFixes <- fixRedundantImports
+  notExportedFixes <- fixNotExported
+
+  let simpleFixes = redundantFixes `combineFixMaps` notExportedFixes
+
+  putStrLn $ "Combined simple fixes: " ++ show (Map.size simpleFixes) ++ " files with edits"
+  applyFixes simpleFixes
+
 -- | Run all fixes and apply them
 runAllFixes :: IO ()
 runAllFixes = do
@@ -354,14 +369,14 @@ runAllFixes = do
   ambiguousFixes <- fixAmbiguousImports
 
   -- Combine all fixes
-  let 
-      allFixes = notExportedFixes `combine` redundantFixes `combine` ambiguousFixes `combine` notInScopeFixes
-      --allFixes = ambiguousFixes
+  let allFixes =
+        notExportedFixes
+          `combineFixMaps` redundantFixes
+          `combineFixMaps` ambiguousFixes
+          `combineFixMaps` notInScopeFixes
 
   putStrLn $ "Combined fixes: " ++ show (Map.size allFixes) ++ " files with edits"
   applyFixes allFixes
-  where
-    combine = Map.unionWith (++)
 
 replaceReexporters :: ProgramIndex -> [Hir.ModuleText] -> Hir.ModuleText -> [Hir.ModuleText] -> Set.Set Text.Text -> [(Hir.ModuleText, [Edit])]
 replaceReexporters prgIndex importingMods reexportingMod reexportedMods reexportIdentifiers =

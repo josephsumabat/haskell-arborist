@@ -1,27 +1,34 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module BuildGraph.Directory where
 
-import Arborist.Files (ModFileMap, buildModuleFileMap)
-import Arborist.ProgramIndex (ProgramIndex)
-import Control.Monad (forM)
-import Data.Aeson ((.=))
-import Data.Aeson qualified as Aeson
+import Arborist.Files (ModFileMap, buildModuleFileMap, getHsFiles)
+import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, getPrgs)
+import BuildGraph.Directory.TH (targetKeyTagModifier)
+import Control.Monad (foldM)
+import Data.Aeson (SumEncoding (..))
+import Data.Aeson.TH (Options (..), defaultOptions, deriveJSON)
 import Data.ByteString qualified as BS
 import Data.Foldable (foldl')
 import Data.Graph (SCC (..), stronglyConnComp)
+import Data.List qualified as List
+import Data.Function ((&))
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -29,6 +36,20 @@ import GHC.Generics (Generic)
 import HaskellAnalyzer (parsePrg)
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
+import System.Directory (makeAbsolute, listDirectory)
+import System.FilePath
+  ( dropTrailingPathSeparator
+  , isAbsolute
+  , makeRelative
+  , normalise
+  , splitDirectories
+  , takeDirectory
+  , (</>)
+  )
+import Optics ((.~))
+import Optics.TH (makeFieldLabelsNoPrefix)
+import Debug.Trace
+import qualified Data.HashMap.Lazy as Map
 
 -- | Error cases encountered while attempting to build a maximal acyclic graph
 data BuildGraphError
@@ -36,13 +57,19 @@ data BuildGraphError
   deriving (Eq, Show)
 
 -- | Canonical representation of a directory (split on module components)
-newtype DirName = DirName {segments :: [Text]}
+newtype DirName = DirName {dirText :: Text}
   deriving stock (Eq, Ord, Generic)
   deriving anyclass (Hashable)
 
 instance Show DirName where
-  show (DirName []) = "."
-  show (DirName segs) = T.unpack (T.intercalate "." segs)
+  show (DirName text) = T.unpack text
+
+-- | Information about the root directory used for relative path calculations
+data RootDirectory = RootDirectory
+  { rootPath :: FilePath
+  , rootLabel :: Text
+  }
+  deriving (Eq, Show)
 
 -- | Identifier for targets in the directory graph
 data TargetKey
@@ -56,21 +83,57 @@ data Target = Target
   { key :: TargetKey
   , dir :: DirName
   , modules :: Set Hir.ModuleText
-  , dependsOn :: Set TargetKey
+  , dependsOn :: Set Hir.ModuleText
   }
   deriving (Eq, Show)
 
--- | Complete target graph once all cycles have been resolved
-newtype MaxDirTargetGraph = MaxDirTargetGraph
+data MaxDirTargetGraph = MaxDirTargetGraph
   { targets :: HashMap TargetKey Target
+  , moduleToTarget :: HashMap Hir.ModuleText TargetKey
+  , rootInfo :: RootDirectory
   }
   deriving (Eq, Show)
+
+-- | Serializable representation of the target graph
+data BuildGraphOutput = BuildGraphOutput
+  { targets :: [TargetOutput]
+  , moduleToTarget :: HashMap Text TargetKeyOutput
+  }
+  deriving (Eq, Show, Generic)
+
+data TargetOutput = TargetOutput
+  { key :: TargetKeyOutput
+  , directory :: Text
+  , modules :: [Text]
+  , dependsOn :: [Text]
+  }
+  deriving (Eq, Show, Generic)
+
+data TargetKeyOutput
+  = DirectoryTargetOutput Text
+  | ModuleTargetOutput Text
+  deriving (Eq, Show, Generic)
+
+$(deriveJSON
+    defaultOptions
+      { sumEncoding = TaggedObject {tagFieldName = "type", contentsFieldName = "name"}
+      , constructorTagModifier = targetKeyTagModifier
+      }
+    ''TargetKeyOutput
+ )
+$(deriveJSON defaultOptions ''TargetOutput)
+$(deriveJSON defaultOptions ''BuildGraphOutput)
 
 -- Internal representations ----------------------------------------------------
 
+data ModuleLocation
+  = LocalModule DirName
+  | ExternalModule
+  deriving (Eq, Show)
+
 data ModuleInfo = ModuleInfo
   { name :: Hir.ModuleText
-  , dir :: DirName
+  , location :: ModuleLocation
   , imports :: Set Hir.ModuleText
   }
 
@@ -84,47 +147,122 @@ data BuildState = BuildState
   { moduleInfos :: HashMap Hir.ModuleText ModuleInfo
   , moduleToTarget :: HashMap Hir.ModuleText TargetKey
   , targets :: HashMap TargetKey TargetState
+  , rootInfo :: RootDirectory
   }
+
+$(makeFieldLabelsNoPrefix ''BuildState)
 
 -- Public API -----------------------------------------------------------------
 
-buildMaxDirTargetGraph :: ProgramIndex -> Either BuildGraphError MaxDirTargetGraph
-buildMaxDirTargetGraph programIndex = do
-  buildState <- resolveDirectoryTargets (initialBuildState programIndex)
+buildMaxDirTargetGraph :: RootDirectory -> ProgramIndex -> ModFileMap -> Either BuildGraphError MaxDirTargetGraph
+buildMaxDirTargetGraph rootInfo programIndex fullModFileMap = do
+  buildState <- resolveDirectoryTargets (initialBuildState rootInfo programIndex fullModFileMap)
   pure (finalizeGraph buildState)
 
-buildGraphFromDirectories :: [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
-buildGraphFromDirectories sourceDirs = do
-  modFileMap <- buildModuleFileMap sourceDirs
-  programIndex <- loadProgramIndex modFileMap
-  pure (buildMaxDirTargetGraph programIndex)
+buildGraphFromDirectories :: FilePath -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
+buildGraphFromDirectories rootDir sourceDirs = do
+  rootInfo <- normalizeRootDirectory rootDir
+  rootedDirs <- mapM (resolveSourceDir rootInfo) sourceDirs
+  localModFileMap <- buildModuleFileMap rootedDirs
+  fullModFileMap <- buildModuleFileMap [rootInfo.rootPath]
+  --programIndex <- loadProgramIndex localModFileMap fullModFileMap
+  programIndex <- loadAllPrograms [rootDir]
 
-loadProgramIndex :: ModFileMap -> IO ProgramIndex
-loadProgramIndex modFileMap = do
-  pairs <- forM (HM.toList modFileMap) $ \(modText, file) -> do
-    program <- parseProgramFromFile file
-    pure (modText, program)
-  pure (HM.fromList pairs)
+  pure (buildMaxDirTargetGraph rootInfo programIndex fullModFileMap)
+
+loadSimpleProgramIndex :: ModFileMap -> ModFileMap -> IO ProgramIndex
+loadSimpleProgramIndex files fullModFileMap =
+  foldM
+    (\acc file -> do
+        program <- parseProgramFromFile file
+        let accWithSelf =
+              maybe
+                Map.empty
+                (\moduleText -> HM.insert moduleText program acc)
+                program.mod
+        gatherScopeDeps accWithSelf program fullModFileMap Nothing
+    )
+    HM.empty
+    files
+
+loadProgramIndex :: ModFileMap -> ModFileMap -> IO ProgramIndex
+loadProgramIndex files fullModFileMap =
+  go HM.empty Set.empty (HM.elems files)
+ where
+  go :: ProgramIndex -> Set FilePath -> [FilePath] -> IO ProgramIndex
+  go acc visitedDirs pendingFiles = do
+    acc' <- loadFiles acc pendingFiles
+    let moduleDirs = moduleDirectories acc'
+        newDirs = Set.difference moduleDirs visitedDirs
+    if Set.null newDirs
+      then pure acc'
+      else do
+        let nextVisited = Set.union visitedDirs newDirs
+            siblingFiles = siblingFilesForDirs acc' newDirs
+        go acc' nextVisited siblingFiles
+
+  loadFiles :: ProgramIndex -> [FilePath] -> IO ProgramIndex
+  loadFiles acc [] = pure acc
+  loadFiles acc filePaths =
+    foldM loadFile acc (Set.toList (Set.fromList filePaths))
+
+  loadFile :: ProgramIndex -> FilePath -> IO ProgramIndex
+  loadFile acc file =
+    case HM.lookup file fileToModule of
+      Just moduleText | HM.member moduleText acc -> pure acc
+      _ -> do
+        program <- parseProgramFromFile file
+        let accWithSelf =
+              maybe
+                Map.empty
+                (\moduleText -> HM.insert moduleText program acc)
+                program.mod
+        gatherScopeDeps accWithSelf program fullModFileMap Nothing
+
+  fileToModule :: HashMap FilePath Hir.ModuleText
+  fileToModule = HM.fromList [(file, moduleText) | (moduleText, file) <- HM.toList fullModFileMap]
+
+  moduleDirectories :: ProgramIndex -> Set FilePath
+  moduleDirectories index =
+    Set.fromList (map takeDirectory (mapMaybe (`HM.lookup` fullModFileMap) (HM.keys index)))
+
+  siblingFilesForDirs :: ProgramIndex -> Set FilePath -> [FilePath]
+  siblingFilesForDirs index dirs =
+    Set.toList . Set.fromList $
+      [ file
+      | (moduleText, file) <- HM.toList fullModFileMap
+      , takeDirectory file `Set.member` dirs
+      , not (HM.member moduleText index)
+      ]
+
+loadAllPrograms :: [FilePath] -> IO ProgramIndex
+loadAllPrograms dirs = do
+  absDirs <- mapM makeAbsolute dirs
+  fullModFileMap <- buildModuleFileMap absDirs
+  snd <$> getPrgs Map.empty (Map.toList fullModFileMap)
 
 -- Construction ----------------------------------------------------------------
 
-initialBuildState :: ProgramIndex -> BuildState
-initialBuildState programIndex =
+initialBuildState :: RootDirectory -> ProgramIndex -> ModFileMap -> BuildState
+initialBuildState rootInfo programIndex fullModFileMap =
   let moduleInfos =
         HM.fromList
           [ (moduleName, toInfo moduleName program)
           | (moduleName, program) <- HM.toList programIndex
           ]
-
       moduleToTarget =
         HM.fromList
-          [ (info.name, DirectoryTarget info.dir)
+          [ (info.name, DirectoryTarget dir)
           | info <- HM.elems moduleInfos
+          , LocalModule dir <- [info.location]
           ]
 
       dirGroups =
         foldl'
-          (\acc info -> HM.insertWith Set.union info.dir (Set.singleton info.name) acc)
+          (\acc info -> case info.location of
+              LocalModule dir -> HM.insertWith Set.union dir (Set.singleton info.name) acc
+              ExternalModule -> acc
+          )
           HM.empty
           (HM.elems moduleInfos)
 
@@ -134,20 +272,54 @@ initialBuildState programIndex =
           | (dir, modules) <- HM.toList dirGroups
           , let key = DirectoryTarget dir
           ]
-   in BuildState {moduleInfos, moduleToTarget, targets}
+   in BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
  where
   toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
   toInfo moduleName program =
-    ModuleInfo
-      { name = moduleName
-      , dir = moduleDirectory moduleName
-      , imports = Set.fromList ((.mod) <$> program.imports)
-      }
+    case HM.lookup moduleName fullModFileMap of
+      Just filePath ->
+        localInfo filePath
+      Nothing -> externalInfo
+   where
+    localInfo filePath =
+      ModuleInfo
+        { name = moduleName
+        , location = LocalModule (moduleDirectory rootInfo filePath)
+        , imports = Set.fromList ((.mod) <$> program.imports)
+        }
+    externalInfo =
+      ModuleInfo
+        { name = moduleName
+        , location = ExternalModule
+        , imports = Set.fromList ((.mod) <$> program.imports)
+        }
 
-moduleDirectory :: Hir.ModuleText -> DirName
-moduleDirectory moduleText =
-  let parts = NE.toList moduleText.parts
-   in DirName (take (length parts - 1) parts)
+moduleDirectory :: RootDirectory -> FilePath -> DirName
+moduleDirectory rootInfo filePath =
+  let dirPath = normalise (takeDirectory filePath)
+   in DirName (directoryText rootInfo dirPath)
+
+
+normalizeRootDirectory :: FilePath -> IO RootDirectory
+normalizeRootDirectory path = do
+  absRoot <- makeAbsolute path
+  let normalized = dropTrailingPathSeparator (normalise absRoot)
+      label = "."
+  pure RootDirectory {rootPath = normalized, rootLabel = label}
+
+resolveSourceDir :: RootDirectory -> FilePath -> IO FilePath
+resolveSourceDir root dir = do
+  absInput <- makeAbsolute dir
+  let normalizedAbs = normalise absInput
+      relativeToRoot = normalise (makeRelative root.rootPath normalizedAbs)
+  if isOutsideRoot relativeToRoot
+    then
+      if isAbsolute dir
+        then pure normalizedAbs
+        else pure (normalise (root.rootPath </> dir))
+    else pure normalizedAbs
+ where
+  isOutsideRoot rel = ".." `List.isPrefixOf` rel
 
 -- Cycle resolution ------------------------------------------------------------
 
@@ -216,23 +388,25 @@ splitModule parentKey moduleName state =
               then HM.delete parentKey state.targets
               else HM.insert parentKey (withModules parent remainingModules) state.targets
 
-          moduleInfo =
-            fromMaybe
-              (error "Missing module info while splitting targets")
-              (HM.lookup moduleName state.moduleInfos)
-          newKey = ModuleTarget moduleName
-          newTarget =
-            TargetState
-              { key = newKey
-              , dir = moduleInfo.dir
-              , modules = Set.singleton moduleName
-              }
-          targetsWithNew = HM.insert newKey newTarget targetsWithoutModule
-          moduleToTarget = HM.insert moduleName newKey state.moduleToTarget
-       in state
-            { targets = targetsWithNew
-            , moduleToTarget
-            }
+       in case HM.lookup moduleName state.moduleInfos of
+            Nothing -> state
+            Just moduleInfo ->
+              let newKey = ModuleTarget moduleName
+                  moduleDir =
+                    case moduleInfo.location of
+                      LocalModule dir -> dir
+                      ExternalModule -> parent.dir
+                  newTarget =
+                    TargetState
+                      { key = newKey
+                      , dir = moduleDir
+                      , modules = Set.singleton moduleName
+                      }
+                  targetsWithNew = HM.insert newKey newTarget targetsWithoutModule
+                  moduleToTarget = HM.insert moduleName newKey state.moduleToTarget
+               in state
+                    & #targets .~ targetsWithNew
+                    & #moduleToTarget .~ moduleToTarget
 
 withModules :: TargetState -> Set Hir.ModuleText -> TargetState
 withModules targetState newModules =
@@ -243,20 +417,28 @@ withModules targetState newModules =
     }
 
 pickCycleModules :: BuildState -> [[TargetKey]] -> NonEmpty Hir.ModuleText
+pickCycleModules _ [] = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"} :| []
 pickCycleModules state (cycleVertices : _) =
   case NE.nonEmpty (concatMap (targetModules state) cycleVertices) of
     Just ne -> ne
     Nothing -> fallback cycleVertices
  where
-  fallback (vertex : _) =
-    case HM.lookup vertex state.targets of
-      Just targetState ->
-        case Set.toList targetState.modules of
-          moduleName : _ -> moduleName :| []
-          [] -> error "Cycle target without modules"
-      Nothing -> error "Missing target while reporting cycle"
-  fallback [] = error "Empty cycle encountered"
-pickCycleModules _ [] = error "Internal error: pickCycleModules with no cycles"
+  fallback (vertex : rest) =
+    case vertex of
+      ModuleTarget moduleName -> moduleName :| []
+      DirectoryTarget _ ->
+        case HM.lookup vertex state.targets of
+          Just targetState ->
+            case NE.nonEmpty (Set.toList targetState.modules) of
+              Just (moduleName :| _) -> moduleName :| []
+              Nothing -> fallback rest
+          Nothing -> fallback rest
+  fallback [] =
+    case HM.toList state.moduleInfos of
+      (moduleName, _) : _ -> moduleName :| []
+      [] -> unknownModule
+  unknownModule = unknownModuleText :| []
+  unknownModuleText = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"}
 
 targetModules :: BuildState -> TargetKey -> [Hir.ModuleText]
 targetModules state key =
@@ -285,6 +467,24 @@ collectDeps state key targetState =
           , depKey /= key
           ]
 
+computeTargetModuleDependencies :: BuildState -> HashMap TargetKey (Set Hir.ModuleText)
+computeTargetModuleDependencies state =
+  HM.mapWithKey (collectModuleDeps state) state.targets
+
+collectModuleDeps :: BuildState -> TargetKey -> TargetState -> Set Hir.ModuleText
+collectModuleDeps state key targetState =
+  Set.unions (moduleDeps <$> Set.toList targetState.modules)
+ where
+  moduleDeps moduleName =
+    case HM.lookup moduleName state.moduleInfos of
+      Nothing -> Set.empty
+      Just info ->
+        Set.fromList
+          [ depName
+          | depName <- Set.toList info.imports
+          , HM.lookup depName state.moduleToTarget /= Just key
+          ]
+
 buildGraphNodes :: BuildState -> HashMap TargetKey (Set TargetKey) -> [(TargetKey, TargetKey, [TargetKey])]
 buildGraphNodes state deps =
   [ (key, key, Set.toList (HM.lookupDefault Set.empty key deps))
@@ -295,56 +495,87 @@ buildGraphNodes state deps =
 
 finalizeGraph :: BuildState -> MaxDirTargetGraph
 finalizeGraph state =
-  let deps = computeTargetDependencies state
+  let moduleDeps = computeTargetModuleDependencies state
       materialize targetState =
         Target
           { key = targetState.key
           , dir = targetState.dir
           , modules = targetState.modules
-          , dependsOn = HM.lookupDefault Set.empty targetState.key deps
+          , dependsOn = HM.lookupDefault Set.empty targetState.key moduleDeps
           }
       targets = HM.map materialize state.targets
-   in MaxDirTargetGraph {targets}
+      moduleAssignments = state.moduleToTarget
+   in MaxDirTargetGraph {targets, moduleToTarget = moduleAssignments, rootInfo = state.rootInfo}
 
-graphToJson :: MaxDirTargetGraph -> Aeson.Value
-graphToJson graph =
-  Aeson.object
-    [ "targets" .= map targetToJson (HM.elems graph.targets)
-    ]
+graphToOutput :: MaxDirTargetGraph -> BuildGraphOutput
+graphToOutput graph =
+  BuildGraphOutput
+    { targets = map targetToOutput (HM.elems graph.targets)
+    , moduleToTarget = moduleAssignments
+    }
  where
-  targetToJson :: Target -> Aeson.Value
-  targetToJson target =
-    Aeson.object
-      [ "key" .= targetKeyToJson target.key
-      , "directory" .= dirNameToText target.dir
-      , "modules" .= map moduleTextToText (Set.toList target.modules)
-      , "dependsOn" .= map targetKeyToJson (Set.toList target.dependsOn)
+  targetToOutput :: Target -> TargetOutput
+  targetToOutput target =
+    TargetOutput
+      { key = keyOutput target.key
+      , directory = dirNameToText target.dir
+      , modules = map qualifiedModuleName (Set.toList target.modules)
+      , dependsOn = map qualifiedModuleName (Set.toList target.dependsOn)
+      }
+
+  qualifiedModuleName :: Hir.ModuleText -> Text
+  qualifiedModuleName moduleName =
+    case HM.lookup moduleName graph.moduleToTarget >>= (`HM.lookup` graph.targets) of
+      Just target -> moduleName.text
+      Nothing -> moduleName.text
+
+  qualify :: Text -> Hir.ModuleText -> Text
+  qualify dirText moduleName
+    | T.null dirText = moduleTextToText moduleName
+    | otherwise =
+        let dirSegments = splitDirSegments dirText
+            moduleSegments = NE.toList moduleName.parts
+            suffixLen = longestMatchingSuffix dirSegments moduleSegments
+            remainder = drop suffixLen moduleSegments
+            combined =
+              if null dirSegments
+                then moduleSegments
+                else dirSegments ++ remainder
+         in T.intercalate "." combined
+
+  splitDirSegments :: Text -> [Text]
+  splitDirSegments txt = filter (not . T.null) (T.splitOn "." txt)
+
+  longestMatchingSuffix :: [Text] -> [Text] -> Int
+  longestMatchingSuffix dirSegments moduleSegments = go maxLen
+   where
+    lenDir = length dirSegments
+    maxLen = min lenDir (length moduleSegments)
+    go k
+      | k <= 0 = 0
+      | drop (lenDir - k) dirSegments == take k moduleSegments = k
+      | otherwise = go (k - 1)
+
+  moduleAssignments :: HashMap Text TargetKeyOutput
+  moduleAssignments =
+    HM.fromList
+      [ (qualifiedModuleName moduleName, keyOutput targetKey)
+      | (moduleName, targetKey) <- HM.toList graph.moduleToTarget
       ]
+
+  keyOutput :: TargetKey -> TargetKeyOutput
+  keyOutput key =
+    case key of
+      DirectoryTarget dirName -> DirectoryTargetOutput (dirNameToText dirName)
+      ModuleTarget moduleName -> ModuleTargetOutput moduleName.text
 
 renderBuildGraphError :: BuildGraphError -> String
 renderBuildGraphError (ModuleCycleDetected mods) =
   "Unable to build acyclic target graph; modules participating in cycle: "
     <> T.unpack (T.intercalate ", " (map moduleTextToText (NE.toList mods)))
 
-targetKeyToJson :: TargetKey -> Aeson.Value
-targetKeyToJson key =
-  case key of
-    DirectoryTarget dirName ->
-      Aeson.object
-        [ "type" .= Aeson.String "directory"
-        , "name" .= dirNameToText dirName
-        ]
-    ModuleTarget moduleName ->
-      Aeson.object
-        [ "type" .= Aeson.String "module"
-        , "name" .= moduleTextToText moduleName
-        ]
-
 dirNameToText :: DirName -> Text
-dirNameToText (DirName segments) =
-  case segments of
-    [] -> "."
-    _ -> T.intercalate "." segments
+dirNameToText (DirName text) = text
 
 moduleTextToText :: Hir.ModuleText -> Text
 moduleTextToText = (.text)
@@ -354,3 +585,22 @@ parseProgramFromFile file = do
   bytes <- BS.readFile file
   let (_src, prg) = parsePrg (TE.decodeUtf8 bytes)
   pure prg
+
+directoryText :: RootDirectory -> FilePath -> Text
+directoryText root dirPath =
+  let relativeRaw = makeRelative root.rootPath dirPath
+      relative = normalise relativeRaw
+   in if relative == "." || null relative
+        then root.rootLabel
+        else if isOutsideRoot relative
+          then T.pack dirPath
+          else pathToDot relative
+ where
+  isOutsideRoot rel = ".." `List.isPrefixOf` rel
+
+pathToDot :: FilePath -> Text
+pathToDot fp =
+  let segments = filter (not . null) (splitDirectories fp)
+   in case segments of
+        [] -> ""
+        _ -> T.intercalate "." (map T.pack segments)

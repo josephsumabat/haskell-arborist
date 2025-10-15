@@ -39,6 +39,7 @@ library
       Arborist.AutoExport
       Arborist.AutoImport
       Arborist.AutoQualify
+      Arborist.Config
       Arborist.Debug
       Arborist.Debug.Trace
       Arborist.DocIndex
@@ -59,6 +60,7 @@ library
       Arborist.Scope.Local
       Arborist.Scope.Types
       Arborist.TreeSitter
+      BuildGraph.Directory
       Data.Change
       Data.Edit
       Data.Path
@@ -78,8 +80,9 @@ library
       Hir.Write.Types
       ModUtils
       Scripts.DirCycles
+      Scripts.DumpRenamedAst
   other-modules:
-      Paths_haskell_arborist
+      BuildGraph.Directory.TH
   hs-source-dirs:
       src
   default-extensions:
@@ -184,6 +187,7 @@ executable haskell-arborist
     , lens
     , nonempty-containers
     , optics
+    , optparse-applicative
     , pretty-simple
     , raw-strings-qq
     , regex-tdfa
