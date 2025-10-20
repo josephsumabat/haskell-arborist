@@ -45,6 +45,7 @@ library
       Arborist.DocIndex
       Arborist.Exports
       Arborist.Files
+      Arborist.GlobImports
       Arborist.Haddock
       Arborist.ModExports
       Arborist.ProgramIndex

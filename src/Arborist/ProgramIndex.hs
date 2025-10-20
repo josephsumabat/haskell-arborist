@@ -11,6 +11,7 @@ module Arborist.ProgramIndex (
 
 import Arborist.Exports
 import Arborist.Files
+import Arborist.GlobImports (globImportModules)
 import Control.Error
 import Control.Monad
 import Data.ByteString qualified as BS
@@ -18,7 +19,7 @@ import Data.Foldable
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
 import Data.Set qualified as Set
-import Data.Text.Encoding qualified as T
+import Data.Text.Encoding qualified as TE
 import GHC.Stack
 import HaskellAnalyzer
 import Hir
@@ -49,11 +50,13 @@ gatherTransitiveDeps prgIndex rootProgram modFileMap =
         case prgM of
           Nothing -> go acc' visited' seen stack
           Just prg ->
-            let imports = fmap (.mod) (getImports prg)
+            let globImports = globImportModules modFileMap next prg
+                imports = fmap (.mod) (getImports prg)
+                allImports = globImports ++ imports
                 enqueue (!seenAcc, !stackAcc) importMod
                   | Set.member importMod seenAcc = (seenAcc, stackAcc)
                   | otherwise = (Set.insert importMod seenAcc, importMod : stackAcc)
-                (seen', stack') = foldl' enqueue (seen, stack) imports
+                (seen', stack') = foldl' enqueue (seen, stack) allImports
              in go acc' visited' seen' stack'
 
   ensureProgram :: ModuleText -> ProgramIndex -> IO (ProgramIndex, Maybe Hir.Read.Program)
@@ -203,7 +206,7 @@ getPrgs prgs hsFiles =
         if fileExists
           then do
             -- traceShowMPretty file
-            fileContents <- T.decodeUtf8 <$> BS.readFile file
+            fileContents <- TE.decodeUtf8 <$> BS.readFile file
             let (_src, !prg) = parsePrg fileContents
                 !parsedList' = (modText, prg) : parsedList
                 !nextSeen = Set.insert modText seen

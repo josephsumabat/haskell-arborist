@@ -11,8 +11,10 @@
 module BuildGraph.Directory where
 
 import Arborist.Files (ModFileMap, buildModuleFileMap, getHsFiles)
+import Arborist.GlobImports (globImportModules)
 import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
 import BuildGraph.Directory.TH (targetKeyTagModifier)
+import Control.Applicative ((<|>))
 import Control.Monad (foldM)
 import Data.Aeson (SumEncoding (..))
 import Data.Aeson.TH (Options (..), defaultOptions, deriveJSON)
@@ -28,7 +30,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe, maybeToList, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -54,8 +56,17 @@ import Arborist.Debug.Trace
 import Hir.Parse
 
 -- | Error cases encountered while attempting to build a maximal acyclic graph
+data ModuleCycleEdge = ModuleCycleEdge
+  { sourceModule :: Hir.ModuleText
+  , importedModule :: Hir.ModuleText
+  }
+  deriving (Eq, Show)
+
+unknownModule :: Hir.ModuleText
+unknownModule = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"}
+
 data BuildGraphError
-  = ModuleCycleDetected (NonEmpty Hir.ModuleText)
+  = ModuleCycleDetected (NonEmpty ModuleCycleEdge)
   deriving (Eq, Show)
 
 -- | Canonical representation of a directory (split on module components)
@@ -285,14 +296,19 @@ initialBuildState rootInfo programIndex fullModFileMap =
       ModuleInfo
         { name = moduleName
         , location = LocalModule (moduleDirectory rootInfo filePath)
-        , imports =  Set.fromList ((.mod) <$> program.imports)
+        , imports = moduleImports
         }
     externalInfo =
       ModuleInfo
         { name = moduleName
         , location = ExternalModule
-        , imports = Set.fromList ((.mod) <$> program.imports)
+        , imports = moduleImports
         }
+
+    moduleImports =
+      let directImports = (.mod) <$> program.imports
+          globImports = globImportModules fullModFileMap moduleName program
+       in Set.fromList (directImports ++ globImports)
 
 moduleDirectory :: RootDirectory -> FilePath -> DirName
 moduleDirectory rootInfo filePath =
@@ -327,27 +343,27 @@ resolveDirectoryTargets :: BuildState -> Either BuildGraphError BuildState
 resolveDirectoryTargets = go
  where
   go state =
-    let deps = computeTargetDependencies state
+    let (deps, edgeMap) = computeTargetDependencies state
         nodes = buildGraphNodes state deps
         cycles = [vertices | CyclicSCC vertices <- stronglyConnComp nodes]
      in case cycles of
           [] -> Right state
           _ ->
-            let (state', changed) = foldl' splitCycle (state, False) cycles
+            let (state', changed) = foldl' (splitCycle edgeMap) (state, False) cycles
              in if changed
                   then go state'
-                  else Left (ModuleCycleDetected (pickCycleModules state cycles))
+                  else Left (ModuleCycleDetected (pickCycleEdges deps edgeMap state cycles))
 
-splitCycle :: (BuildState, Bool) -> [TargetKey] -> (BuildState, Bool)
-splitCycle (state, changed) vertices =
+splitCycle :: HashMap (TargetKey, TargetKey) ModuleCycleEdge -> (BuildState, Bool) -> [TargetKey] -> (BuildState, Bool)
+splitCycle edgeMap (state, changed) vertices =
   let cycleSet = Set.fromList vertices
    in foldl'
-        (splitTarget cycleSet)
+        (splitTarget edgeMap cycleSet)
         (state, changed)
         vertices
 
-splitTarget :: Set TargetKey -> (BuildState, Bool) -> TargetKey -> (BuildState, Bool)
-splitTarget cycleSet (state, changed) key =
+splitTarget :: HashMap (TargetKey, TargetKey) ModuleCycleEdge -> Set TargetKey -> (BuildState, Bool) -> TargetKey -> (BuildState, Bool)
+splitTarget _edgeMap cycleSet (state, changed) key =
   case HM.lookup key state.targets of
     Nothing -> (state, changed)
     Just targetState ->
@@ -416,29 +432,49 @@ withModules targetState newModules =
     , modules = newModules
     }
 
-pickCycleModules :: BuildState -> [[TargetKey]] -> NonEmpty Hir.ModuleText
-pickCycleModules _ [] = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"} :| []
-pickCycleModules state (cycleVertices : _) =
-  case NE.nonEmpty (concatMap (targetModules state) cycleVertices) of
-    Just ne -> ne
-    Nothing -> fallback cycleVertices
+pickCycleEdges :: HashMap TargetKey (Set TargetKey) -> HashMap (TargetKey, TargetKey) ModuleCycleEdge -> BuildState -> [[TargetKey]] -> NonEmpty ModuleCycleEdge
+pickCycleEdges _ _ _ [] = ModuleCycleEdge unknownModule unknownModule :| []
+pickCycleEdges deps edgeMap state (cycleVertices : _) =
+  case NE.nonEmpty explicitEdges of
+    Just edges -> edges
+    Nothing -> ModuleCycleEdge (pickModule fallbackTarget) (pickModule fallbackTarget) :| []
  where
-  fallback (vertex : rest) =
-    case vertex of
-      ModuleTarget moduleName -> moduleName :| []
-      DirectoryTarget _ ->
-        case HM.lookup vertex state.targets of
-          Just targetState ->
-            case NE.nonEmpty (Set.toList targetState.modules) of
-              Just (moduleName :| _) -> moduleName :| []
-              Nothing -> fallback rest
-          Nothing -> fallback rest
-  fallback [] =
-    case HM.toList state.moduleInfos of
-      (moduleName, _) : _ -> moduleName :| []
+  cycleSet = Set.fromList cycleVertices
+
+  explicitEdges =
+    [ fromMaybe (fallbackEdge fromTarget toTarget) (lookupEdge fromTarget toTarget)
+    | fromTarget <- cycleVertices
+    , toTarget <- Set.toList (HM.lookupDefault Set.empty fromTarget deps)
+    , Set.member toTarget cycleSet
+    ]
+
+  lookupEdge fromTarget toTarget =
+    HM.lookup (fromTarget, toTarget) edgeMap <|> findEdge fromTarget toTarget
+
+  findEdge fromTarget toTarget = do
+    targetState <- HM.lookup fromTarget state.targets
+    let modules = Set.toList targetState.modules
+        candidateEdges =
+          [ ModuleCycleEdge moduleName depName
+          | moduleName <- modules
+          , info <- maybeToList (HM.lookup moduleName state.moduleInfos)
+          , depName <- Set.toList info.imports
+          , HM.lookup depName state.moduleToTarget == Just toTarget
+          ]
+    listToMaybe candidateEdges
+
+  fallbackEdge fromTarget toTarget =
+    ModuleCycleEdge (pickModule fromTarget) (pickModule toTarget)
+
+  pickModule targetKey =
+    case targetModules state targetKey of
+      moduleName : _ -> moduleName
       [] -> unknownModule
-  unknownModule = unknownModuleText :| []
-  unknownModuleText = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"}
+
+  fallbackTarget = case cycleVertices of
+    vertex : _ -> vertex
+    [] -> DirectoryTarget (DirName (T.pack "Unknown"))
+
 
 targetModules :: BuildState -> TargetKey -> [Hir.ModuleText]
 targetModules state key =
@@ -448,24 +484,39 @@ targetModules state key =
 
 -- Dependency analysis ---------------------------------------------------------
 
-computeTargetDependencies :: BuildState -> HashMap TargetKey (Set TargetKey)
+computeTargetDependencies :: BuildState -> (HashMap TargetKey (Set TargetKey), HashMap (TargetKey, TargetKey) ModuleCycleEdge)
 computeTargetDependencies state =
-  HM.mapWithKey (collectDeps state) state.targets
+  HM.foldlWithKey'
+    (\(depMap, edgeMap) key targetState ->
+        let (depsForKey, edgesForKey) = collectDeps state key targetState
+            depMap' = HM.insert key depsForKey depMap
+            edgeMap' = HM.union edgeMap (HM.mapKeys (key,) edgesForKey)
+         in (depMap', edgeMap')
+    )
+    (HM.empty, HM.empty)
+    state.targets
 
-collectDeps :: BuildState -> TargetKey -> TargetState -> Set TargetKey
+collectDeps :: BuildState -> TargetKey -> TargetState -> (Set TargetKey, HashMap TargetKey ModuleCycleEdge)
 collectDeps state key targetState =
-  Set.unions (moduleDeps <$> Set.toList targetState.modules)
- where
-  moduleDeps moduleName =
-    case HM.lookup moduleName state.moduleInfos of
-      Nothing -> Set.empty
-      Just info ->
-        Set.fromList
-          [ depKey
-          | depName <- Set.toList info.imports
-          , Just depKey <- [HM.lookup depName state.moduleToTarget]
-          , depKey /= key
-          ]
+  foldl'
+    (\(depSet, edgeMap) moduleName ->
+        case HM.lookup moduleName state.moduleInfos of
+          Nothing -> (depSet, edgeMap)
+          Just info ->
+            foldl'
+              (\(accSet, accMap) depName ->
+                  case HM.lookup depName state.moduleToTarget of
+                    Just depKey | depKey /= key ->
+                      ( Set.insert depKey accSet
+                      , HM.insert depKey (ModuleCycleEdge moduleName depName) accMap
+                      )
+                    _ -> (accSet, accMap)
+              )
+              (depSet, edgeMap)
+              (Set.toList info.imports)
+    )
+    (Set.empty, HM.empty)
+    (Set.toList targetState.modules)
 
 computeTargetModuleDependencies :: BuildState -> HashMap TargetKey (Set Hir.ModuleText)
 computeTargetModuleDependencies state =
@@ -570,9 +621,15 @@ graphToOutput graph =
       ModuleTarget moduleName -> ModuleTargetOutput moduleName.text
 
 renderBuildGraphError :: BuildGraphError -> String
-renderBuildGraphError (ModuleCycleDetected mods) =
-  "Unable to build acyclic target graph; modules participating in cycle: "
-    <> T.unpack (T.intercalate ", " (map moduleTextToText (NE.toList mods)))
+renderBuildGraphError (ModuleCycleDetected edges) =
+  let header = "Unable to build acyclic target graph; cycle detected:\n"
+      body = unlines (map formatEdge (NE.toList edges))
+   in header <> body
+ where
+  formatEdge ModuleCycleEdge {sourceModule, importedModule} =
+    T.unpack (moduleTextToText sourceModule)
+      <> " imports "
+      <> T.unpack (moduleTextToText importedModule)
 
 dirNameToText :: DirName -> Text
 dirNameToText (DirName text) = text
