@@ -11,7 +11,7 @@
 module BuildGraph.Directory where
 
 import Arborist.Files (ModFileMap, buildModuleFileMap, getHsFiles)
-import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, getPrgs)
+import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
 import BuildGraph.Directory.TH (targetKeyTagModifier)
 import Control.Monad (foldM)
 import Data.Aeson (SumEncoding (..))
@@ -50,6 +50,8 @@ import Optics ((.~))
 import Optics.TH (makeFieldLabelsNoPrefix)
 import Debug.Trace
 import qualified Data.HashMap.Lazy as Map
+import Arborist.Debug.Trace
+import Hir.Parse
 
 -- | Error cases encountered while attempting to build a maximal acyclic graph
 data BuildGraphError
@@ -136,6 +138,7 @@ data ModuleInfo = ModuleInfo
   , location :: ModuleLocation
   , imports :: Set Hir.ModuleText
   }
+  deriving (Eq, Show)
 
 data TargetState = TargetState
   { key :: TargetKey
@@ -166,21 +169,17 @@ buildGraphFromDirectories rootDir sourceDirs = do
   localModFileMap <- buildModuleFileMap rootedDirs
   fullModFileMap <- buildModuleFileMap [rootInfo.rootPath]
   --programIndex <- loadProgramIndex localModFileMap fullModFileMap
-  programIndex <- loadAllPrograms [rootDir]
+  programIndex <- loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
+  --programIndex <- loadAllPrograms [rootDir]
 
   pure (buildMaxDirTargetGraph rootInfo programIndex fullModFileMap)
 
-loadSimpleProgramIndex :: ModFileMap -> ModFileMap -> IO ProgramIndex
+loadSimpleProgramIndex :: [FilePath] -> ModFileMap -> IO ProgramIndex
 loadSimpleProgramIndex files fullModFileMap =
   foldM
     (\acc file -> do
         program <- parseProgramFromFile file
-        let accWithSelf =
-              maybe
-                Map.empty
-                (\moduleText -> HM.insert moduleText program acc)
-                program.mod
-        gatherScopeDeps accWithSelf program fullModFileMap Nothing
+        gatherTransitiveDeps acc program fullModFileMap
     )
     HM.empty
     files
@@ -272,20 +271,21 @@ initialBuildState rootInfo programIndex fullModFileMap =
           | (dir, modules) <- HM.toList dirGroups
           , let key = DirectoryTarget dir
           ]
-   in BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
+   in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
  where
   toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
-  toInfo moduleName program =
+  toInfo moduleName program = traceIdWhen (moduleName == parseModuleTextFromText "Mercury.Network.Bugsnag.Init") $
     case HM.lookup moduleName fullModFileMap of
       Just filePath ->
         localInfo filePath
       Nothing -> externalInfo
+
    where
     localInfo filePath =
       ModuleInfo
         { name = moduleName
         , location = LocalModule (moduleDirectory rootInfo filePath)
-        , imports = Set.fromList ((.mod) <$> program.imports)
+        , imports =  Set.fromList ((.mod) <$> program.imports)
         }
     externalInfo =
       ModuleInfo

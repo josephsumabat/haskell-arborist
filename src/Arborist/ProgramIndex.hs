@@ -1,6 +1,8 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TupleSections #-}
 
 module Arborist.ProgramIndex (
+  gatherTransitiveDeps,
   gatherScopeDeps,
   getPrgs,
   ProgramIndex,
@@ -27,7 +29,50 @@ import System.Directory qualified as Dir
 -- | In memory index of module -> program
 type ProgramIndex = Map.HashMap ModuleText Hir.Read.Program
 
+-- | Collect all transitively imported modules for the provided program.
+gatherTransitiveDeps :: ProgramIndex -> Hir.Read.Program -> ModFileMap -> IO ProgramIndex
+gatherTransitiveDeps prgIndex rootProgram modFileMap =
+  case rootProgram.mod of
+    Nothing -> pure prgIndex
+    Just rootModule -> do
+      let !withRoot = Map.insert rootModule rootProgram prgIndex
+          !initialSeen = Set.singleton rootModule
+      go withRoot Set.empty initialSeen [rootModule]
+ where
+  go :: ProgramIndex -> Set.Set ModuleText -> Set.Set ModuleText -> [ModuleText] -> IO ProgramIndex
+  go !acc !_visited !_seen [] = pure acc
+  go !acc !visited !seen (next : stack)
+    | Set.member next visited = go acc visited seen stack
+    | otherwise = do
+        (acc', prgM) <- ensureProgram next acc
+        let !visited' = Set.insert next visited
+        case prgM of
+          Nothing -> go acc' visited' seen stack
+          Just prg ->
+            let imports = fmap (.mod) (getImports prg)
+                enqueue (!seenAcc, !stackAcc) importMod
+                  | Set.member importMod seenAcc = (seenAcc, stackAcc)
+                  | otherwise = (Set.insert importMod seenAcc, importMod : stackAcc)
+                (seen', stack') = foldl' enqueue (seen, stack) imports
+             in go acc' visited' seen' stack'
+
+  ensureProgram :: ModuleText -> ProgramIndex -> IO (ProgramIndex, Maybe Hir.Read.Program)
+  ensureProgram modText !acc =
+    case Map.lookup modText acc of
+      Just prg -> pure (acc, Just prg)
+      Nothing ->
+        case Map.lookup modText modFileMap of
+          Nothing -> pure (acc, Nothing)
+          Just depFile -> do
+            (newPrgs, acc') <- getPrgs acc [(modText, depFile)]
+            let prg =
+                  case List.lookup modText newPrgs of
+                    Just parsed -> Just parsed
+                    Nothing -> Map.lookup modText acc'
+            pure (acc', prg)
+
 -- | Find all dependencies required to resolve a given module and add them to a `ProgramIndex`
+-- ONLY finds dependencies required to resolve scope - which means only recursively checks re-exported modules
 -- Optionally accepts a maximum depth to search dependencies for
 gatherScopeDeps :: ProgramIndex -> Hir.Read.Program -> ModFileMap -> Maybe Int -> IO ProgramIndex
 gatherScopeDeps prgIndex thisPrg modFileMap maxDepth = do
