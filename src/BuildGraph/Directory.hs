@@ -22,6 +22,7 @@ import Data.ByteString qualified as BS
 import Data.Graph (SCC (..), stronglyConnComp)
 import Data.List (foldl')
 import Data.List qualified as List
+import Data.Ord (comparing)
 import Data.Function ((&))
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
@@ -29,7 +30,6 @@ import Data.Hashable (Hashable)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe, maybeToList)
-import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -467,9 +467,12 @@ splitModule parentKey moduleName state =
             Just moduleInfo ->
               let newKey = ModuleTarget moduleName
                   moduleDir =
-                    case moduleInfo.location of
-                      LocalModule dir -> dir
-                      ExternalModule -> parent.dir
+                    case parent.key of
+                      RecursiveDirectoryTarget parentDir -> parentDir
+                      _ ->
+                        case moduleInfo.location of
+                          LocalModule dir -> dir
+                          ExternalModule -> parent.dir
                   newTarget =
                     TargetState
                       { key = newKey
