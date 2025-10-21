@@ -1,7 +1,7 @@
 module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
-import BuildGraph.Directory (buildGraphFromDirectories, graphToOutput, renderBuildGraphError)
+import BuildGraph.Directory (buildGraphFromDirectoriesWithRecursiveTargets, graphToOutput, renderBuildGraphError)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.List.NonEmpty (NonEmpty)
@@ -27,6 +27,7 @@ data Command
 data DumpTargetGraphOptions = DumpTargetGraphOptions
   { rootDir :: FilePath
   , srcDirs :: NonEmpty FilePath
+  , recursiveTargetDirs :: [FilePath]
   }
 
 main :: IO ()
@@ -115,10 +116,17 @@ commandParser =
                   )
               )
             )
+        <*> Opt.many
+          ( Opt.strOption
+              ( Opt.long "recursive-target"
+                  <> Opt.metavar "DIR"
+                  <> Opt.help "Directory to treat as a recursive target (may be provided multiple times)"
+              )
+          )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
-runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs} = do
-  result <- buildGraphFromDirectories rootDir (NE.toList srcDirs)
+runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs} = do
+  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir (NE.toList srcDirs) recursiveTargetDirs
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))

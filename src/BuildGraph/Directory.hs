@@ -10,7 +10,7 @@
 
 module BuildGraph.Directory where
 
-import Arborist.Files (ModFileMap, buildModuleFileMap, getHsFiles)
+import Arborist.Files (ModFileMap, buildModuleFileMap)
 import Arborist.GlobImports (globImportModules)
 import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
 import BuildGraph.Directory.TH (targetKeyTagModifier)
@@ -19,8 +19,8 @@ import Control.Monad (foldM)
 import Data.Aeson (SumEncoding (..))
 import Data.Aeson.TH (Options (..), defaultOptions, deriveJSON)
 import Data.ByteString qualified as BS
-import Data.Foldable (foldl')
 import Data.Graph (SCC (..), stronglyConnComp)
+import Data.List (foldl')
 import Data.List qualified as List
 import Data.Function ((&))
 import Data.HashMap.Strict (HashMap)
@@ -28,9 +28,10 @@ import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe, maybeToList)
+import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.Maybe (listToMaybe, mapMaybe, maybeToList, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -38,7 +39,7 @@ import GHC.Generics (Generic)
 import HaskellAnalyzer (parsePrg)
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
-import System.Directory (makeAbsolute, listDirectory)
+import System.Directory (makeAbsolute)
 import System.FilePath
   ( dropTrailingPathSeparator
   , isAbsolute
@@ -50,7 +51,6 @@ import System.FilePath
   )
 import Optics ((.~))
 import Optics.TH (makeFieldLabelsNoPrefix)
-import Debug.Trace
 import qualified Data.HashMap.Lazy as Map
 import Arborist.Debug.Trace
 import Hir.Parse
@@ -87,6 +87,7 @@ data RootDirectory = RootDirectory
 -- | Identifier for targets in the directory graph
 data TargetKey
   = DirectoryTarget DirName
+  | RecursiveDirectoryTarget DirName
   | ModuleTarget Hir.ModuleText
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (Hashable)
@@ -124,6 +125,7 @@ data TargetOutput = TargetOutput
 
 data TargetKeyOutput
   = DirectoryTargetOutput Text
+  | RecursiveDirectoryTargetOutput Text
   | ModuleTargetOutput Text
   deriving (Eq, Show, Generic)
 
@@ -169,12 +171,20 @@ $(makeFieldLabelsNoPrefix ''BuildState)
 -- Public API -----------------------------------------------------------------
 
 buildMaxDirTargetGraph :: RootDirectory -> ProgramIndex -> ModFileMap -> Either BuildGraphError MaxDirTargetGraph
-buildMaxDirTargetGraph rootInfo programIndex fullModFileMap = do
-  buildState <- resolveDirectoryTargets (initialBuildState rootInfo programIndex fullModFileMap)
+buildMaxDirTargetGraph rootInfo programIndex fullModFileMap =
+  buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap Set.empty
+
+buildMaxDirTargetGraphWithRecursiveTargets :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> Either BuildGraphError MaxDirTargetGraph
+buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveTargetDirs = do
+  buildState <- resolveDirectoryTargets (initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs)
   pure (finalizeGraph buildState)
 
 buildGraphFromDirectories :: FilePath -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
-buildGraphFromDirectories rootDir sourceDirs = do
+buildGraphFromDirectories rootDir sourceDirs =
+  buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs []
+
+buildGraphFromDirectoriesWithRecursiveTargets :: FilePath -> [FilePath] -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
+buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs recursiveTargetDirs = do
   rootInfo <- normalizeRootDirectory rootDir
   rootedDirs <- mapM (resolveSourceDir rootInfo) sourceDirs
   localModFileMap <- buildModuleFileMap rootedDirs
@@ -182,8 +192,9 @@ buildGraphFromDirectories rootDir sourceDirs = do
   --programIndex <- loadProgramIndex localModFileMap fullModFileMap
   programIndex <- loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
   --programIndex <- loadAllPrograms [rootDir]
-
-  pure (buildMaxDirTargetGraph rootInfo programIndex fullModFileMap)
+  recursiveDirs <- mapM (resolveRecursiveTargetDir rootInfo) recursiveTargetDirs
+  let recursiveDirSet = Set.fromList recursiveDirs
+  pure (buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveDirSet)
 
 loadSimpleProgramIndex :: [FilePath] -> ModFileMap -> IO ProgramIndex
 loadSimpleProgramIndex files fullModFileMap =
@@ -253,34 +264,37 @@ loadAllPrograms dirs = do
 
 -- Construction ----------------------------------------------------------------
 
-initialBuildState :: RootDirectory -> ProgramIndex -> ModFileMap -> BuildState
-initialBuildState rootInfo programIndex fullModFileMap =
+initialBuildState :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> BuildState
+initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs =
   let moduleInfos =
         HM.fromList
           [ (moduleName, toInfo moduleName program)
           | (moduleName, program) <- HM.toList programIndex
           ]
+      assignments =
+        mapMaybe
+          (\(moduleName, info) -> do
+              (targetKey, targetDir) <- moduleTargetAssignment info
+              pure (moduleName, targetKey, targetDir)
+          )
+          (HM.toList moduleInfos)
+
       moduleToTarget =
         HM.fromList
-          [ (info.name, DirectoryTarget dir)
-          | info <- HM.elems moduleInfos
-          , LocalModule dir <- [info.location]
+          [ (moduleName, targetKey)
+          | (moduleName, targetKey, _) <- assignments
           ]
 
-      dirGroups =
-        foldl'
-          (\acc info -> case info.location of
-              LocalModule dir -> HM.insertWith Set.union dir (Set.singleton info.name) acc
-              ExternalModule -> acc
-          )
-          HM.empty
-          (HM.elems moduleInfos)
-
       targets =
-        HM.fromList
-          [ (key, TargetState {key, dir, modules})
-          | (dir, modules) <- HM.toList dirGroups
-          , let key = DirectoryTarget dir
+        HM.fromListWith mergeTargets
+          [ ( targetKey
+            , TargetState
+                { key = targetKey
+                , dir = targetDir
+                , modules = Set.singleton moduleName
+                }
+            )
+          | (moduleName, targetKey, targetDir) <- assignments
           ]
    in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
  where
@@ -310,6 +324,41 @@ initialBuildState rootInfo programIndex fullModFileMap =
           globImports = globImportModules fullModFileMap moduleName program
        in Set.fromList (directImports ++ globImports)
 
+  moduleTargetAssignment :: ModuleInfo -> Maybe (TargetKey, DirName)
+  moduleTargetAssignment info =
+    case info.location of
+      LocalModule moduleDir ->
+        case findRecursiveTargetDir recursiveTargetDirs moduleDir of
+          Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
+          Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
+      ExternalModule -> Nothing
+
+  mergeTargets :: TargetState -> TargetState -> TargetState
+  mergeTargets left right =
+    TargetState
+      { key = left.key
+      , dir = left.dir
+      , modules = Set.union left.modules right.modules
+      }
+
+  findRecursiveTargetDir :: Set DirName -> DirName -> Maybe DirName
+  findRecursiveTargetDir dirs moduleDir =
+    case filter (`dirIsAncestorOf` moduleDir) (Set.toList dirs) of
+      [] -> Nothing
+      matches -> Just (List.maximumBy (comparing dirDepth) matches)
+
+  dirIsAncestorOf :: DirName -> DirName -> Bool
+  dirIsAncestorOf ancestor child =
+    let ancestorSegments = dirNameSegments ancestor
+        childSegments = dirNameSegments child
+     in List.isPrefixOf ancestorSegments childSegments
+
+  dirDepth :: DirName -> Int
+  dirDepth = length . dirNameSegments
+
+  dirNameSegments :: DirName -> [Text]
+  dirNameSegments (DirName text) = filter (not . T.null) (T.splitOn "." text)
+
 moduleDirectory :: RootDirectory -> FilePath -> DirName
 moduleDirectory rootInfo filePath =
   let dirPath = normalise (takeDirectory filePath)
@@ -335,7 +384,13 @@ resolveSourceDir root dir = do
         else pure (normalise (root.rootPath </> dir))
     else pure normalizedAbs
  where
-  isOutsideRoot rel = ".." `List.isPrefixOf` rel
+ isOutsideRoot rel = ".." `List.isPrefixOf` rel
+
+resolveRecursiveTargetDir :: RootDirectory -> FilePath -> IO DirName
+resolveRecursiveTargetDir root dir = do
+  resolvedDir <- resolveSourceDir root dir
+  let normalized = dropTrailingPathSeparator (normalise resolvedDir)
+  pure (DirName (directoryText root normalized))
 
 -- Cycle resolution ------------------------------------------------------------
 
@@ -369,13 +424,16 @@ splitTarget _edgeMap cycleSet (state, changed) key =
     Just targetState ->
       case key of
         ModuleTarget _ -> (state, changed)
-        DirectoryTarget _ ->
-          let offenders = offendingModules state cycleSet key targetState
-           in if null offenders
-                then (state, changed)
-                else
-                  let state' = foldl' (\acc moduleName -> splitModule key moduleName acc) state offenders
-                   in (state', True)
+        DirectoryTarget _ -> splitDirectoryLike targetState
+        RecursiveDirectoryTarget _ -> splitDirectoryLike targetState
+ where
+  splitDirectoryLike targetState =
+    let offenders = offendingModules state cycleSet key targetState
+     in if null offenders
+          then (state, changed)
+          else
+            let state' = foldl' (\acc moduleName -> splitModule key moduleName acc) state offenders
+             in (state', True)
 
 offendingModules :: BuildState -> Set TargetKey -> TargetKey -> TargetState -> [Hir.ModuleText]
 offendingModules state cycleSet key targetState =
@@ -575,37 +633,7 @@ graphToOutput graph =
       }
 
   qualifiedModuleName :: Hir.ModuleText -> Text
-  qualifiedModuleName moduleName =
-    case HM.lookup moduleName graph.moduleToTarget >>= (`HM.lookup` graph.targets) of
-      Just target -> moduleName.text
-      Nothing -> moduleName.text
-
-  qualify :: Text -> Hir.ModuleText -> Text
-  qualify dirText moduleName
-    | T.null dirText = moduleTextToText moduleName
-    | otherwise =
-        let dirSegments = splitDirSegments dirText
-            moduleSegments = NE.toList moduleName.parts
-            suffixLen = longestMatchingSuffix dirSegments moduleSegments
-            remainder = drop suffixLen moduleSegments
-            combined =
-              if null dirSegments
-                then moduleSegments
-                else dirSegments ++ remainder
-         in T.intercalate "." combined
-
-  splitDirSegments :: Text -> [Text]
-  splitDirSegments txt = filter (not . T.null) (T.splitOn "." txt)
-
-  longestMatchingSuffix :: [Text] -> [Text] -> Int
-  longestMatchingSuffix dirSegments moduleSegments = go maxLen
-   where
-    lenDir = length dirSegments
-    maxLen = min lenDir (length moduleSegments)
-    go k
-      | k <= 0 = 0
-      | drop (lenDir - k) dirSegments == take k moduleSegments = k
-      | otherwise = go (k - 1)
+  qualifiedModuleName moduleName = moduleName.text
 
   moduleAssignments :: HashMap Text TargetKeyOutput
   moduleAssignments =
@@ -618,6 +646,7 @@ graphToOutput graph =
   keyOutput key =
     case key of
       DirectoryTarget dirName -> DirectoryTargetOutput (dirNameToText dirName)
+      RecursiveDirectoryTarget dirName -> RecursiveDirectoryTargetOutput (dirNameToText dirName)
       ModuleTarget moduleName -> ModuleTargetOutput moduleName.text
 
 renderBuildGraphError :: BuildGraphError -> String

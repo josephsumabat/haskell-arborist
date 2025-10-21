@@ -5,5 +5,6 @@ targetKeyTagModifier :: String -> String
 targetKeyTagModifier constructor =
   case constructor of
     "DirectoryTargetOutput" -> "directory"
+    "RecursiveDirectoryTargetOutput" -> "recursiveDirectory"
     "ModuleTargetOutput" -> "module"
     other -> other
