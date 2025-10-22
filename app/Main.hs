@@ -1,11 +1,16 @@
 module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
-import BuildGraph.Directory (buildGraphFromDirectoriesWithRecursiveTargets, graphToOutput, renderBuildGraphError)
+import BuildGraph.Directory
+  ( DirName (..)
+  , buildGraphFromDirectoriesWithRecursiveTargets
+  , graphToOutput
+  , renderBuildGraphError
+  )
+import BuildGraph.GroupCandidates (groupOutputCandidates)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BL8
-import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
+import Data.Text qualified as T
 import Diagnostics.Fixes (runAllFixes)
 import Options.Applicative (Parser, ParserInfo)
 import Options.Applicative qualified as Opt
@@ -23,11 +28,17 @@ data Command
   | DeleteEmptyHidingImports
   | DumpRenamedAst DumpRenamedAstOptions
   | DumpTargetGraph DumpTargetGraphOptions
+  | GroupCandidates GroupCandidatesOptions
 
 data DumpTargetGraphOptions = DumpTargetGraphOptions
   { rootDir :: FilePath
-  , srcDirs :: NonEmpty FilePath
+  , srcDirs :: [FilePath]
   , recursiveTargetDirs :: [FilePath]
+  }
+
+data GroupCandidatesOptions = GroupCandidatesOptions
+  { candidatesInput :: Maybe FilePath
+  , candidatesDirectories :: [DirName]
   }
 
 main :: IO ()
@@ -44,6 +55,7 @@ runCommand cmd = case cmd of
   DeleteEmptyHidingImports -> runDeleteEmptyHidingImports
   DumpRenamedAst opts -> runDumpRenamedAst opts
   DumpTargetGraph opts -> runDumpTargetGraph opts
+  GroupCandidates opts -> runGroupCandidates opts
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -69,6 +81,10 @@ commandParser =
       <> Opt.command "dump-target-graph"
         ( Opt.info (DumpTargetGraph <$> dumpTargetGraphOptionsParser)
             (Opt.progDesc "Emit the maximal acyclic directory target graph as JSON")
+        )
+      <> Opt.command "group-candidates"
+        ( Opt.info (GroupCandidates <$> groupCandidatesOptionsParser)
+            (Opt.progDesc "Merge eligible module targets in an existing BuildGraphOutput")
         )
       <> Opt.metavar "COMMAND"
   where
@@ -109,13 +125,12 @@ commandParser =
               <> Opt.metavar "DIR"
               <> Opt.help "Root directory containing the listed source directories"
           )
-        <*> (NE.fromList <$> Opt.some
-              ( Opt.strArgument
-                  ( Opt.metavar "DIRECTORY..."
-                      <> Opt.help "Source directory (or directories) containing Haskell modules"
-                  )
+        <*> Opt.many
+          ( Opt.strArgument
+              ( Opt.metavar "[DIRECTORY...]"
+                  <> Opt.help "Optional source directories containing Haskell modules (defaults to the root directory)"
               )
-            )
+          )
         <*> Opt.many
           ( Opt.strOption
               ( Opt.long "recursive-target"
@@ -124,9 +139,41 @@ commandParser =
               )
           )
 
+    groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
+    groupCandidatesOptionsParser =
+      GroupCandidatesOptions
+        <$> Opt.optional
+          ( Opt.strOption
+              ( Opt.long "input"
+                  <> Opt.short 'i'
+                  <> Opt.metavar "FILE"
+                  <> Opt.help "Path to BuildGraphOutput JSON (defaults to stdin)"
+              )
+          )
+        <*> Opt.many
+          ( DirName . T.pack
+              <$> Opt.strOption
+                ( Opt.long "directory"
+                    <> Opt.short 'd'
+                    <> Opt.metavar "TARGET"
+                    <> Opt.help "Directory target to restrict merging (may be provided multiple times)"
+                )
+          )
+
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
 runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs} = do
-  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir (NE.toList srcDirs) recursiveTargetDirs
+  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir srcDirs recursiveTargetDirs
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))
+
+runGroupCandidates :: GroupCandidatesOptions -> IO ()
+runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories} = do
+  bytes <-
+    case candidatesInput of
+      Nothing -> BL8.getContents
+      Just path -> BL8.readFile path
+  case Aeson.eitherDecode bytes of
+    Left err -> die ("Failed to parse BuildGraphOutput: " <> err)
+    Right graph ->
+      BL8.putStrLn (Aeson.encode (groupOutputCandidates graph candidatesDirectories))

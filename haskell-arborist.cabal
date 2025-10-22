@@ -48,6 +48,7 @@ library
       Arborist.GlobImports
       Arborist.Haddock
       Arborist.ModExports
+      Arborist.ModuleInfo
       Arborist.ProgramIndex
       Arborist.Reexports
       Arborist.Refactor.Module
@@ -62,6 +63,7 @@ library
       Arborist.Scope.Types
       Arborist.TreeSitter
       BuildGraph.Directory
+      BuildGraph.GroupCandidates
       Data.Change
       Data.Edit
       Data.Path

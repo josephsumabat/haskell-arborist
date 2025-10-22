@@ -184,16 +184,20 @@ buildGraphFromDirectories rootDir sourceDirs =
   buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs []
 
 buildGraphFromDirectoriesWithRecursiveTargets :: FilePath -> [FilePath] -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
-buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs recursiveTargetDirs = do
+buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTargetDirs = do
   rootInfo <- normalizeRootDirectory rootDir
-  rootedDirs <- mapM (resolveSourceDir rootInfo) sourceDirs
+  rootedDirs <- mapM (resolveSourceDir rootInfo) targetDirs
   localModFileMap <- buildModuleFileMap rootedDirs
   fullModFileMap <- buildModuleFileMap [rootInfo.rootPath]
+  programIndex <-
+    case targetDirs of
+      [] -> loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
+      _ -> loadAllPrograms [rootDir]
   --programIndex <- loadProgramIndex localModFileMap fullModFileMap
-  programIndex <- loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
   --programIndex <- loadAllPrograms [rootDir]
   recursiveDirs <- mapM (resolveRecursiveTargetDir rootInfo) recursiveTargetDirs
   let recursiveDirSet = Set.fromList recursiveDirs
+
   pure (buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveDirSet)
 
 loadSimpleProgramIndex :: [FilePath] -> ModFileMap -> IO ProgramIndex
