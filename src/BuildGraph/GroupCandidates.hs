@@ -1,34 +1,43 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module BuildGraph.GroupCandidates (groupOutputCandidates) where
 
-import BuildGraph.Directory
-  ( BuildGraphOutput (..)
-  , DirName (..)
-  , TargetOutput (..)
-  , TargetKeyOutput (..)
-  )
-import Data.Graph (SCC (..), stronglyConnComp)
+import BuildGraph.Directory (
+  BuildGraphOutput (..),
+  DirName (..),
+  TargetKeyOutput (..),
+  TargetOutput (..),
+ )
 import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
+import Data.HashMap.Strict qualified as HM
+import Data.Hashable (Hashable)
 import Data.List (foldl')
-import qualified Data.List as List
+import Data.List qualified as List
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Debug.Trace (trace)
 
+newtype TargetNodeId = TargetNodeId Text
+  deriving (Eq, Ord, Show, Hashable)
+
+targetNodeIdText :: TargetNodeId -> Text
+targetNodeIdText (TargetNodeId txt) = txt
+
 data OutputGraphState = OutputGraphState
-  { ogTargets :: !(HashMap Text OutputTargetState)
+  { ogTargets :: !(HashMap TargetNodeId OutputTargetState)
   , ogModuleToTarget :: !(HashMap Text TargetKeyOutput)
+  , ogTargetDeps :: !(HashMap TargetNodeId (Set TargetNodeId))
+  , ogReverseTargetDeps :: !(HashMap TargetNodeId (Set TargetNodeId))
   }
 
 data OutputTargetState = OutputTargetState
   { otKey :: !TargetKeyOutput
-  , otKeyId :: !Text
+  , otKeyId :: !TargetNodeId
   , otDirectory :: !Text
   , otModules :: !(Set Text)
   , otDependsOn :: !(Set Text)
@@ -70,19 +79,19 @@ mergeDir state dir =
   go currentState (destId : rest) attemptIndex =
     let (nextState, remainingRev, nextAttemptIndex) =
           foldl'
-            (\(st, acc, count) sourceId ->
-               let attemptNo = count + 1
-                in case mergeModuleTargets st dir destId sourceId of
-                     Just mergedState ->
-                       ( trace (formatMergeResult dir destId sourceId True attemptNo totalAttempts) mergedState
-                       , acc
-                       , attemptNo
-                       )
-                     Nothing ->
-                       ( trace (formatMergeResult dir destId sourceId False attemptNo totalAttempts) st
-                       , sourceId : acc
-                       , attemptNo
-                       )
+            ( \(st, acc, count) sourceId ->
+                let attemptNo = count + 1
+                 in case mergeModuleTargets st dir destId sourceId of
+                      Just mergedState ->
+                        ( trace (formatMergeResult dir destId sourceId True attemptNo totalAttempts) mergedState
+                        , acc
+                        , attemptNo
+                        )
+                      Nothing ->
+                        ( trace (formatMergeResult dir destId sourceId False attemptNo totalAttempts) st
+                        , sourceId : acc
+                        , attemptNo
+                        )
             )
             (currentState, [], attemptIndex)
             rest
@@ -97,7 +106,7 @@ collectGroupableDirectories state =
     , isModuleKey target.otKey
     ]
 
-mergeModuleTargets :: OutputGraphState -> Text -> Text -> Text -> Maybe OutputGraphState
+mergeModuleTargets :: OutputGraphState -> Text -> TargetNodeId -> TargetNodeId -> Maybe OutputGraphState
 mergeModuleTargets state dir destId sourceId = do
   destTarget <- HM.lookup destId state.ogTargets
   sourceTarget <- HM.lookup sourceId state.ogTargets
@@ -119,50 +128,53 @@ mergeModuleTargets state dir destId sourceId = do
               (\acc moduleName -> HM.insert moduleName destTarget.otKey acc)
               state.ogModuleToTarget
               (Set.toList sourceTarget.otModules)
-          newState =
-            state
-              { ogTargets = targets'
-              , ogModuleToTarget = moduleToTarget'
-              }
-       in if introducesCycle newState
+          affectedTargets =
+            Set.toList
+              ( Set.insert
+                  destId
+                  (HM.lookupDefault Set.empty sourceId state.ogReverseTargetDeps)
+              )
+          targetDeps' =
+            recomputeDependencies
+              targets'
+              moduleToTarget'
+              state.ogTargetDeps
+              sourceId
+              affectedTargets
+          reverseDeps' =
+            recomputeReverseDependencies
+              targetDeps'
+              state.ogReverseTargetDeps
+              state.ogTargetDeps
+              sourceId
+              affectedTargets
+       in if createsCycle targetDeps' destId
             then Nothing
-            else Just newState
-
-introducesCycle :: OutputGraphState -> Bool
-introducesCycle state =
-  any isCycle (stronglyConnComp nodes)
- where
-  deps = computeTargetDependencies state
-  nodes =
-    [ (keyId, keyId, Set.toList toKeys)
-    | (keyId, toKeys) <- HM.toList deps
-    ]
-  isCycle (CyclicSCC _) = True
-  isCycle _ = False
-
-computeTargetDependencies :: OutputGraphState -> HashMap Text (Set Text)
-computeTargetDependencies OutputGraphState {ogTargets, ogModuleToTarget} =
-  HM.map dependencyTargets ogTargets
- where
-  dependencyTargets target =
-    Set.fromList
-      [ targetKeyId depKey
-      | moduleName <- Set.toList target.otDependsOn
-      , Just depKey <- [HM.lookup moduleName ogModuleToTarget]
-      , let depId = targetKeyId depKey
-      , depId /= target.otKeyId
-      ]
+            else
+              Just
+                state
+                  { ogTargets = targets'
+                  , ogModuleToTarget = moduleToTarget'
+                  , ogTargetDeps = targetDeps'
+                  , ogReverseTargetDeps = reverseDeps'
+                  }
 
 outputToState :: BuildGraphOutput -> OutputGraphState
 outputToState BuildGraphOutput {targets, moduleToTarget} =
   OutputGraphState
-    { ogTargets =
-        HM.fromList
-          [ (targetKeyId target.key, toState target)
-          | target <- targets
-          ]
+    { ogTargets = targetStates
     , ogModuleToTarget = moduleToTarget
+    , ogTargetDeps = targetDeps
+    , ogReverseTargetDeps = reverseDeps
     }
+ where
+  targetStates =
+    HM.fromList
+      [ (targetKeyId target.key, toState target)
+      | target <- targets
+      ]
+  targetDeps = computeTargetDependencies targetStates moduleToTarget
+  reverseDeps = invertDependencies targetDeps
 
 toState :: TargetOutput -> OutputTargetState
 toState TargetOutput {key, directory, modules, dependsOn} =
@@ -178,7 +190,8 @@ stateToOutput :: OutputGraphState -> BuildGraphOutput
 stateToOutput OutputGraphState {ogTargets, ogModuleToTarget} =
   BuildGraphOutput
     { targets =
-        map toOutput
+        map
+          toOutput
           (List.sortOn (\state -> state.otKeyId) (HM.elems ogTargets))
     , moduleToTarget = ogModuleToTarget
     }
@@ -198,21 +211,21 @@ isModuleKey key =
     ModuleTargetOutput _ -> True
     _ -> False
 
-targetKeyId :: TargetKeyOutput -> Text
+targetKeyId :: TargetKeyOutput -> TargetNodeId
 targetKeyId key =
   case key of
-    DirectoryTargetOutput dir -> "directory:" <> dir
-    RecursiveDirectoryTargetOutput dir -> "recursive:" <> dir
-    ModuleTargetOutput name -> "module:" <> name
+    DirectoryTargetOutput dir -> TargetNodeId ("directory:" <> dir)
+    RecursiveDirectoryTargetOutput dir -> TargetNodeId ("recursive:" <> dir)
+    ModuleTargetOutput name -> TargetNodeId ("module:" <> name)
 
-formatMergeResult :: Text -> Text -> Text -> Bool -> Int -> Int -> String
+formatMergeResult :: Text -> TargetNodeId -> TargetNodeId -> Bool -> Int -> Int -> String
 formatMergeResult dir destId sourceId succeeded attempt total =
   "GroupCandidates.merge: attempting merge in directory "
     ++ Text.unpack dir
     ++ " from "
-    ++ Text.unpack sourceId
+    ++ Text.unpack (targetNodeIdText sourceId)
     ++ " into "
-    ++ Text.unpack destId
+    ++ Text.unpack (targetNodeIdText destId)
     ++ " -> "
     ++ resultText
     ++ " ("
@@ -230,3 +243,112 @@ formatMergeResult dir destId sourceId succeeded attempt total =
       else "no merge"
   percentage _ tot | tot <= 0 = 100
   percentage att tot = (att * 100) `div` tot
+
+recomputeDependencies ::
+  HashMap TargetNodeId OutputTargetState ->
+  HashMap Text TargetKeyOutput ->
+  HashMap TargetNodeId (Set TargetNodeId) ->
+  TargetNodeId ->
+  [TargetNodeId] ->
+  HashMap TargetNodeId (Set TargetNodeId)
+recomputeDependencies targets moduleToTarget oldDeps removedTarget affectedTargets =
+  foldl'
+    updateDeps
+    (HM.delete removedTarget oldDeps)
+    affectedTargets
+ where
+  updateDeps acc targetId =
+    case HM.lookup targetId targets of
+      Nothing -> acc
+      Just targetState ->
+        HM.insert targetId (targetDependencies moduleToTarget targetState) acc
+
+recomputeReverseDependencies ::
+  HashMap TargetNodeId (Set TargetNodeId) ->
+  HashMap TargetNodeId (Set TargetNodeId) ->
+  HashMap TargetNodeId (Set TargetNodeId) ->
+  TargetNodeId ->
+  [TargetNodeId] ->
+  HashMap TargetNodeId (Set TargetNodeId)
+recomputeReverseDependencies
+  newDeps
+  oldReverse
+  oldDeps
+  removedTarget
+  affectedTargets =
+    foldl'
+      updateReverse
+      cleanedReverse
+      affectedTargets
+   where
+    sourceOldDeps = HM.lookupDefault Set.empty removedTarget oldDeps
+    withoutRemovedEntry = HM.delete removedTarget oldReverse
+    cleanedReverse =
+      Set.foldl'
+        (\acc dep -> HM.alter (removeDependent removedTarget) dep acc)
+        withoutRemovedEntry
+        sourceOldDeps
+
+    updateReverse acc targetId =
+      let oldDepsForTarget = HM.lookupDefault Set.empty targetId oldDeps
+          newDepsForTarget = HM.lookupDefault Set.empty targetId newDeps
+          removedDeps = Set.toList (Set.difference oldDepsForTarget newDepsForTarget)
+          addedDeps = Set.toList (Set.difference newDepsForTarget oldDepsForTarget)
+          accWithoutRemoved =
+            foldl'
+              (\innerAcc dep -> HM.alter (removeDependent targetId) dep innerAcc)
+              acc
+              removedDeps
+       in foldl'
+            (\innerAcc dep -> HM.insertWith Set.union dep (Set.singleton targetId) innerAcc)
+            accWithoutRemoved
+            addedDeps
+
+removeDependent :: TargetNodeId -> Maybe (Set TargetNodeId) -> Maybe (Set TargetNodeId)
+removeDependent target maybeSet =
+  case maybeSet of
+    Nothing -> Nothing
+    Just entries ->
+      let remaining = Set.delete target entries
+       in if Set.null remaining then Nothing else Just remaining
+
+createsCycle :: HashMap TargetNodeId (Set TargetNodeId) -> TargetNodeId -> Bool
+createsCycle adjMap targetId =
+  depthFirst Set.empty (Set.toList (HM.lookupDefault Set.empty targetId adjMap))
+ where
+  depthFirst _ [] = False
+  depthFirst visited (node : rest)
+    | node == targetId = True
+    | Set.member node visited = depthFirst visited rest
+    | otherwise =
+        let neighbours = Set.toList (HM.lookupDefault Set.empty node adjMap)
+         in depthFirst (Set.insert node visited) (neighbours ++ rest)
+
+computeTargetDependencies ::
+  HashMap TargetNodeId OutputTargetState ->
+  HashMap Text TargetKeyOutput ->
+  HashMap TargetNodeId (Set TargetNodeId)
+computeTargetDependencies targets moduleToTarget =
+  HM.map (targetDependencies moduleToTarget) targets
+
+targetDependencies :: HashMap Text TargetKeyOutput -> OutputTargetState -> Set TargetNodeId
+targetDependencies moduleToTarget target =
+  Set.fromList
+    [ targetKeyId depKey
+    | moduleName <- Set.toList target.otDependsOn
+    , Just depKey <- [HM.lookup moduleName moduleToTarget]
+    , let depId = targetKeyId depKey
+    , depId /= target.otKeyId
+    ]
+
+invertDependencies :: HashMap TargetNodeId (Set TargetNodeId) -> HashMap TargetNodeId (Set TargetNodeId)
+invertDependencies deps =
+  HM.foldlWithKey'
+    ( \acc from toSet ->
+        Set.foldl'
+          (\innerAcc to -> HM.insertWith Set.union to (Set.singleton from) innerAcc)
+          acc
+          toSet
+    )
+    HM.empty
+    deps
