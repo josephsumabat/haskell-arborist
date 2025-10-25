@@ -54,6 +54,7 @@ import Optics.TH (makeFieldLabelsNoPrefix)
 import qualified Data.HashMap.Lazy as Map
 import Arborist.Debug.Trace
 import Hir.Parse
+import Debug.Trace
 
 -- | Error cases encountered while attempting to build a maximal acyclic graph
 data ModuleCycleEdge = ModuleCycleEdge
@@ -303,7 +304,7 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs =
    in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
  where
   toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
-  toInfo moduleName program = traceIdWhen (moduleName == parseModuleTextFromText "Mercury.Network.Bugsnag.Init") $
+  toInfo moduleName program =
     case HM.lookup moduleName fullModFileMap of
       Just filePath ->
         localInfo filePath

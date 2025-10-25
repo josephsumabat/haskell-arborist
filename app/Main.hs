@@ -2,7 +2,10 @@ module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
 import BuildGraph.Directory
-  ( DirName (..)
+  ( BuildGraphOutput (..)
+  , DirName (..)
+  , TargetKeyOutput (..)
+  , TargetOutput (..)
   , buildGraphFromDirectoriesWithRecursiveTargets
   , graphToOutput
   , renderBuildGraphError
@@ -10,6 +13,8 @@ import BuildGraph.Directory
 import BuildGraph.GroupCandidates (groupOutputCandidates)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BL8
+import Data.Maybe (mapMaybe)
+import Data.Set qualified as Set
 import Data.Text qualified as T
 import Diagnostics.Fixes (runAllFixes)
 import Options.Applicative (Parser, ParserInfo)
@@ -39,6 +44,8 @@ data DumpTargetGraphOptions = DumpTargetGraphOptions
 data GroupCandidatesOptions = GroupCandidatesOptions
   { candidatesInput :: Maybe FilePath
   , candidatesDirectories :: [DirName]
+  , groupRecursive :: Bool
+  , groupAll :: Bool
   }
 
 main :: IO ()
@@ -159,16 +166,25 @@ commandParser =
                     <> Opt.help "Directory target to restrict merging (may be provided multiple times)"
                 )
           )
+        <*> Opt.switch
+          ( Opt.long "group-recursive"
+              <> Opt.help "Automatically group directories that were emitted as recursive targets"
+          )
+        <*> Opt.switch
+          ( Opt.long "group-all"
+              <> Opt.help "Attempt to group every directory in the BuildGraphOutput"
+          )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
 runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs} = do
-  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir srcDirs recursiveTargetDirs
+  let effectiveSrcDirs = if null srcDirs then [rootDir] else srcDirs
+  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))
 
 runGroupCandidates :: GroupCandidatesOptions -> IO ()
-runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories} = do
+runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories, groupRecursive, groupAll} = do
   bytes <-
     case candidatesInput of
       Nothing -> BL8.getContents
@@ -176,4 +192,21 @@ runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectorie
   case Aeson.eitherDecode bytes of
     Left err -> die ("Failed to parse BuildGraphOutput: " <> err)
     Right graph ->
-      BL8.putStrLn (Aeson.encode (groupOutputCandidates graph candidatesDirectories))
+      let recursiveDirs =
+            if groupRecursive
+              then map DirName (mapMaybe recursiveTargetDirectory graphTargets)
+              else []
+          allDirs =
+            if groupAll
+              then map DirName (Set.toList (Set.fromList (mapMaybe moduleTargetDirectory graphTargets)))
+              else []
+          requestedDirs =
+            Set.toList $ Set.fromList (candidatesDirectories <> recursiveDirs <> allDirs)
+       in BL8.putStrLn (Aeson.encode (groupOutputCandidates graph requestedDirs))
+     where
+      graphTargets = case graph of
+        BuildGraphOutput {targets = ts} -> ts
+      recursiveTargetDirectory TargetOutput {key = RecursiveDirectoryTargetOutput dir} = Just dir
+      recursiveTargetDirectory _ = Nothing
+      moduleTargetDirectory TargetOutput {key = ModuleTargetOutput _, directory = dir} = Just dir
+      moduleTargetDirectory _ = Nothing

@@ -13,6 +13,7 @@ import Control.Error.Util (note)
 import Control.Monad (guard, join)
 import Data.Either qualified as Either
 import Data.Either.Extra (eitherToMaybe)
+import Data.List qualified as List
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe qualified as Maybe
 import Data.Text (Text)
@@ -324,6 +325,22 @@ parseImports i = do
   let (es', imports') = Either.partitionEithers imports
   pure (es ++ es', imports')
 
+recoverImportsFromErrorNodes :: H.HaskellP -> ([Text], [Import HirRead])
+recoverImportsFromErrorNodes haskellNode =
+  case collectErrorImportNodes False haskellNode.dynNode of
+    [] -> ([], [])
+    imports ->
+      let parsed = parseImport <$> imports
+          (es, imports') = Either.partitionEithers parsed
+       in (es, List.nub imports')
+
+collectErrorImportNodes :: Bool -> AST.DynNode -> [H.ImportP]
+collectErrorImportNodes insideError node =
+  let insideError' = insideError || node.nodeType == "ERROR"
+   in case AST.cast @H.ImportP node of
+        Just importNode | insideError' -> [importNode]
+        _ -> node.nodeChildren >>= collectErrorImportNodes insideError'
+
 parseDataType :: H.DataTypeP -> AST.Err (DataDecl HirRead)
 parseDataType node = do
   dt <- AST.unwrap node
@@ -458,14 +475,14 @@ emptyProgram =
 parseHaskell :: H.HaskellP -> ([Text], Program HirRead)
 parseHaskell h = do
   let res = do
-        let imports = Maybe.fromMaybe Nothing $ Error.hush $ AST.collapseErr h.imports
+        let collapsedImports = join (Error.hush (AST.collapseErr h.imports))
         let mod =
               findNode (AST.cast @H.HeaderP) (AST.getDynNode h)
                 >>= eitherToMaybe . (.module')
                 >>= eitherToMaybe . parseModuleText
-        (es, imports) <- case imports of
-          Nothing -> pure ([], [])
-          Just imports -> parseImports imports
+        (es, imports) <- case collapsedImports of
+          Just importsNode -> parseImports importsNode
+          Nothing -> pure (recoverImportsFromErrorNodes h)
         header <- AST.collapseErr h.children
         (es', exports) <- case header of
           Nothing -> pure (es, Nothing)
