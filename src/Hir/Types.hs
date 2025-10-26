@@ -219,7 +219,7 @@ data TypeFamilyDecl s = TypeFamilyDecl
 
 data TypeSynonymDecl s = TypeSynonymDecl
   { name :: Name s
-  , node :: H.TypeSynomymP
+  , node :: H.TypeSynonymP
   }
   deriving (Show, Eq)
 

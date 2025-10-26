@@ -442,7 +442,7 @@ parseTypeFamily t = do
   name <- parseNamePrefix =<< removeQualified name
   pure $ DeclTypeFamily TypeFamilyDecl {name, node = t}
 
-parseTypeSynonym :: H.TypeSynomymP -> AST.Err (Decl HirRead)
+parseTypeSynonym :: H.TypeSynonymP -> AST.Err (Decl HirRead)
 parseTypeSynonym t = do
   tu <- AST.unwrap t
   name <- note "no name for type synonym" tu.name
@@ -459,7 +459,7 @@ parseDeclaration decl = case decl.getDeclaration of
   AST.Inj @H.NewtypeP n -> pure @[] <$> parseNewtype n
   AST.Inj @H.PatternSynonymP p -> parsePatternSyn p
   AST.Inj @H.TypeFamilyP t -> pure @[] <$> parseTypeFamily t
-  AST.Inj @H.TypeSynomymP t -> pure @[] <$> parseTypeSynonym t
+  AST.Inj @H.TypeSynonymP t -> pure @[] <$> parseTypeSynonym t
   _ -> pure []
 
 emptyProgram :: Program HirRead
