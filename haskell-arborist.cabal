@@ -86,6 +86,7 @@ library
       Scripts.DumpRenamedAst
   other-modules:
       BuildGraph.Directory.TH
+      BuildGraph.ModuleTargetOverrides
   hs-source-dirs:
       src
   default-extensions:

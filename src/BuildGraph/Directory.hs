@@ -14,6 +14,11 @@ import Arborist.Files (ModFileMap, buildModuleFileMap)
 import Arborist.GlobImports (globImportModules)
 import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
 import BuildGraph.Directory.TH (targetKeyTagModifier)
+import BuildGraph.ModuleTargetOverrides (
+  ModuleTargetOverrides (..),
+  TargetOverride (..),
+  emptyTargetOverrides
+ )
 import Control.Applicative ((<|>))
 import Control.Monad (foldM)
 import Data.Aeson (SumEncoding (..))
@@ -68,6 +73,7 @@ unknownModule = Hir.ModuleText {parts = "Unknown" :| [], text = "Unknown"}
 
 data BuildGraphError
   = ModuleCycleDetected (NonEmpty ModuleCycleEdge)
+  | ModuleAssignedMultipleTargets Hir.ModuleText (NonEmpty ModuleTargetAssignment)
   deriving (Eq, Show)
 
 -- | Canonical representation of a directory (split on module components)
@@ -102,9 +108,14 @@ data Target = Target
   }
   deriving (Eq, Show)
 
+data ModuleTargetAssignment
+  = AssignedTarget TargetKey
+  | PreassignedTarget TargetOverride
+  deriving (Eq, Show)
+
 data MaxDirTargetGraph = MaxDirTargetGraph
   { targets :: HashMap TargetKey Target
-  , moduleToTarget :: HashMap Hir.ModuleText TargetKey
+  , moduleToTarget :: HashMap Hir.ModuleText ModuleTargetAssignment
   , rootInfo :: RootDirectory
   }
   deriving (Eq, Show)
@@ -128,6 +139,7 @@ data TargetKeyOutput
   = DirectoryTargetOutput Text
   | RecursiveDirectoryTargetOutput Text
   | ModuleTargetOutput Text
+  | ExternalTargetOutput Text
   deriving (Eq, Show, Generic)
 
 $(deriveJSON
@@ -165,27 +177,30 @@ data BuildState = BuildState
   , moduleToTarget :: HashMap Hir.ModuleText TargetKey
   , targets :: HashMap TargetKey TargetState
   , rootInfo :: RootDirectory
+  , preassignedTargets :: HashMap Hir.ModuleText TargetOverride
   }
 
 $(makeFieldLabelsNoPrefix ''BuildState)
 
 -- Public API -----------------------------------------------------------------
 
-buildMaxDirTargetGraph :: RootDirectory -> ProgramIndex -> ModFileMap -> Either BuildGraphError MaxDirTargetGraph
-buildMaxDirTargetGraph rootInfo programIndex fullModFileMap =
-  buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap Set.empty
+buildMaxDirTargetGraph :: RootDirectory -> ProgramIndex -> ModFileMap -> Maybe ModuleTargetOverrides -> Either BuildGraphError MaxDirTargetGraph
+buildMaxDirTargetGraph rootInfo programIndex fullModFileMap overrides =
+  buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap Set.empty overrides
 
-buildMaxDirTargetGraphWithRecursiveTargets :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> Either BuildGraphError MaxDirTargetGraph
-buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveTargetDirs = do
-  buildState <- resolveDirectoryTargets (initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs)
+buildMaxDirTargetGraphWithRecursiveTargets :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> Maybe ModuleTargetOverrides -> Either BuildGraphError MaxDirTargetGraph
+buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveTargetDirs overrides = do
+  let activeOverrides = fromMaybe emptyTargetOverrides overrides
+  buildState <- resolveDirectoryTargets (initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs activeOverrides)
+  validateTargetAssignments buildState
   pure (finalizeGraph buildState)
 
-buildGraphFromDirectories :: FilePath -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
-buildGraphFromDirectories rootDir sourceDirs =
-  buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs []
+buildGraphFromDirectories :: FilePath -> [FilePath] -> Maybe ModuleTargetOverrides -> IO (Either BuildGraphError MaxDirTargetGraph)
+buildGraphFromDirectories rootDir sourceDirs overrides =
+  buildGraphFromDirectoriesWithRecursiveTargets rootDir sourceDirs [] overrides
 
-buildGraphFromDirectoriesWithRecursiveTargets :: FilePath -> [FilePath] -> [FilePath] -> IO (Either BuildGraphError MaxDirTargetGraph)
-buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTargetDirs = do
+buildGraphFromDirectoriesWithRecursiveTargets :: FilePath -> [FilePath] -> [FilePath] -> Maybe ModuleTargetOverrides -> IO (Either BuildGraphError MaxDirTargetGraph)
+buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTargetDirs overrides = do
   rootInfo <- normalizeRootDirectory rootDir
   rootedDirs <- mapM (resolveSourceDir rootInfo) targetDirs
   localModFileMap <- buildModuleFileMap rootedDirs
@@ -199,7 +214,7 @@ buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTarget
   recursiveDirs <- mapM (resolveRecursiveTargetDir rootInfo) recursiveTargetDirs
   let recursiveDirSet = Set.fromList recursiveDirs
 
-  pure (buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveDirSet)
+  pure (buildMaxDirTargetGraphWithRecursiveTargets rootInfo programIndex fullModFileMap recursiveDirSet overrides)
 
 loadSimpleProgramIndex :: [FilePath] -> ModFileMap -> IO ProgramIndex
 loadSimpleProgramIndex files fullModFileMap =
@@ -269,17 +284,22 @@ loadAllPrograms dirs = do
 
 -- Construction ----------------------------------------------------------------
 
-initialBuildState :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> BuildState
-initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs =
+initialBuildState :: RootDirectory -> ProgramIndex -> ModFileMap -> Set DirName -> ModuleTargetOverrides -> BuildState
+initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overrides =
   let moduleInfos =
         HM.fromList
           [ (moduleName, toInfo moduleName program)
           | (moduleName, program) <- HM.toList programIndex
           ]
+      ModuleTargetOverrides overrideRaw = overrides
+      preassignedTargets =
+        HM.filterWithKey
+          (\moduleName _ -> HM.member moduleName moduleInfos)
+          overrideRaw
       assignments =
         mapMaybe
           (\(moduleName, info) -> do
-              (targetKey, targetDir) <- moduleTargetAssignment info
+              (targetKey, targetDir) <- moduleTargetAssignment preassignedTargets info
               pure (moduleName, targetKey, targetDir)
           )
           (HM.toList moduleInfos)
@@ -301,7 +321,7 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs =
             )
           | (moduleName, targetKey, targetDir) <- assignments
           ]
-   in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo}
+   in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo, preassignedTargets}
  where
   toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
   toInfo moduleName program =
@@ -329,14 +349,16 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs =
           globImports = globImportModules fullModFileMap moduleName program
        in Set.fromList (directImports ++ globImports)
 
-  moduleTargetAssignment :: ModuleInfo -> Maybe (TargetKey, DirName)
-  moduleTargetAssignment info =
-    case info.location of
-      LocalModule moduleDir ->
-        case findRecursiveTargetDir recursiveTargetDirs moduleDir of
-          Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
-          Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
-      ExternalModule -> Nothing
+  moduleTargetAssignment :: HashMap Hir.ModuleText TargetOverride -> ModuleInfo -> Maybe (TargetKey, DirName)
+  moduleTargetAssignment overridesMap info
+    | HM.member info.name overridesMap = Nothing
+    | otherwise =
+      case info.location of
+        LocalModule moduleDir ->
+          case findRecursiveTargetDir recursiveTargetDirs moduleDir of
+            Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
+            Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
+        ExternalModule -> Nothing
 
   mergeTargets :: TargetState -> TargetState -> TargetState
   mergeTargets left right =
@@ -610,6 +632,29 @@ buildGraphNodes state deps =
 
 -- Finalization ----------------------------------------------------------------
 
+validateTargetAssignments :: BuildState -> Either BuildGraphError ()
+validateTargetAssignments state = do
+  generatedAssignments <- foldM collectAssignments HM.empty (HM.toList state.targets)
+  mapM_ (checkPreassigned generatedAssignments) (HM.toList state.preassignedTargets)
+ where
+  collectAssignments :: HashMap Hir.ModuleText ModuleTargetAssignment -> (TargetKey, TargetState) -> Either BuildGraphError (HashMap Hir.ModuleText ModuleTargetAssignment)
+  collectAssignments acc (targetKey, targetState) =
+    foldM (assignModule targetKey) acc (Set.toList targetState.modules)
+
+  assignModule :: TargetKey -> HashMap Hir.ModuleText ModuleTargetAssignment -> Hir.ModuleText -> Either BuildGraphError (HashMap Hir.ModuleText ModuleTargetAssignment)
+  assignModule targetKey acc moduleName =
+    case HM.lookup moduleName acc of
+      Nothing -> pure (HM.insert moduleName (AssignedTarget targetKey) acc)
+      Just existing ->
+        Left (ModuleAssignedMultipleTargets moduleName (existing :| [AssignedTarget targetKey]))
+
+  checkPreassigned :: HashMap Hir.ModuleText ModuleTargetAssignment -> (Hir.ModuleText, TargetOverride) -> Either BuildGraphError ()
+  checkPreassigned generated (moduleName, override) =
+    case HM.lookup moduleName generated of
+      Nothing -> pure ()
+      Just existing ->
+        Left (ModuleAssignedMultipleTargets moduleName (existing :| [PreassignedTarget override]))
+
 finalizeGraph :: BuildState -> MaxDirTargetGraph
 finalizeGraph state =
   let moduleDeps = computeTargetModuleDependencies state
@@ -621,7 +666,9 @@ finalizeGraph state =
           , dependsOn = HM.lookupDefault Set.empty targetState.key moduleDeps
           }
       targets = HM.map materialize state.targets
-      moduleAssignments = state.moduleToTarget
+      generatedAssignments = AssignedTarget <$> state.moduleToTarget
+      preassignedAssignments = PreassignedTarget <$> state.preassignedTargets
+      moduleAssignments = HM.union generatedAssignments preassignedAssignments
    in MaxDirTargetGraph {targets, moduleToTarget = moduleAssignments, rootInfo = state.rootInfo}
 
 graphToOutput :: MaxDirTargetGraph -> BuildGraphOutput
@@ -646,8 +693,8 @@ graphToOutput graph =
   moduleAssignments :: HashMap Text TargetKeyOutput
   moduleAssignments =
     HM.fromList
-      [ (qualifiedModuleName moduleName, keyOutput targetKey)
-      | (moduleName, targetKey) <- HM.toList graph.moduleToTarget
+      [ (qualifiedModuleName moduleName, assignmentOutput assignment)
+      | (moduleName, assignment) <- HM.toList graph.moduleToTarget
       ]
 
   keyOutput :: TargetKey -> TargetKeyOutput
@@ -657,16 +704,48 @@ graphToOutput graph =
       RecursiveDirectoryTarget dirName -> RecursiveDirectoryTargetOutput (dirNameToText dirName)
       ModuleTarget moduleName -> ModuleTargetOutput moduleName.text
 
+  assignmentOutput :: ModuleTargetAssignment -> TargetKeyOutput
+  assignmentOutput assignment =
+    case assignment of
+      AssignedTarget key -> keyOutput key
+      PreassignedTarget (TargetOverride target) -> ExternalTargetOutput target
+
 renderBuildGraphError :: BuildGraphError -> String
-renderBuildGraphError (ModuleCycleDetected edges) =
-  let header = "Unable to build acyclic target graph; cycle detected:\n"
-      body = unlines (map formatEdge (NE.toList edges))
-   in header <> body
+renderBuildGraphError err =
+  case err of
+    ModuleCycleDetected edges ->
+      let header = "Unable to build acyclic target graph; cycle detected:\n"
+          body = unlines (map formatEdge (NE.toList edges))
+       in header <> body
+    ModuleAssignedMultipleTargets moduleName assignments ->
+      let header = "Module assigned to multiple targets:\n"
+          body =
+            T.unpack (moduleTextToText moduleName)
+              <> " -> "
+              <> assignmentSummary assignments
+       in header <> body <> "\n"
  where
   formatEdge ModuleCycleEdge {sourceModule, importedModule} =
     T.unpack (moduleTextToText sourceModule)
       <> " imports "
       <> T.unpack (moduleTextToText importedModule)
+
+  assignmentSummary :: NonEmpty ModuleTargetAssignment -> String
+  assignmentSummary assignments =
+    T.unpack (T.intercalate ", " (NE.toList (fmap assignmentLabel assignments)))
+
+  assignmentLabel :: ModuleTargetAssignment -> Text
+  assignmentLabel assignment =
+    case assignment of
+      AssignedTarget key -> describeTargetKey key
+      PreassignedTarget (TargetOverride overrideText) -> "preassigned:" <> overrideText
+
+  describeTargetKey :: TargetKey -> Text
+  describeTargetKey key =
+    case key of
+      DirectoryTarget dirName -> "directory:" <> dirNameToText dirName
+      RecursiveDirectoryTarget dirName -> "recursiveDirectory:" <> dirNameToText dirName
+      ModuleTarget moduleName -> "module:" <> moduleName.text
 
 dirNameToText :: DirName -> Text
 dirNameToText (DirName text) = text

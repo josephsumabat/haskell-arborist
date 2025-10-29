@@ -178,7 +178,7 @@ commandParser =
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
 runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs} = do
   let effectiveSrcDirs = if null srcDirs then [rootDir] else srcDirs
-  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs
+  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs Nothing
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))

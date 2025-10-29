@@ -7,4 +7,5 @@ targetKeyTagModifier constructor =
     "DirectoryTargetOutput" -> "directory"
     "RecursiveDirectoryTargetOutput" -> "recursiveDirectory"
     "ModuleTargetOutput" -> "module"
+    "ExternalTargetOutput" -> "external"
     other -> other

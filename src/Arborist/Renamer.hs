@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeAbstractions #-}
 
 module Arborist.Renamer (
   renamePrg,

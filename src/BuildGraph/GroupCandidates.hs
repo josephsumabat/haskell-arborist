@@ -217,6 +217,7 @@ targetKeyId key =
     DirectoryTargetOutput dir -> TargetNodeId ("directory:" <> dir)
     RecursiveDirectoryTargetOutput dir -> TargetNodeId ("recursive:" <> dir)
     ModuleTargetOutput name -> TargetNodeId ("module:" <> name)
+    ExternalTargetOutput name -> TargetNodeId ("external:" <> name)
 
 formatMergeResult :: Text -> TargetNodeId -> TargetNodeId -> Bool -> Int -> Int -> String
 formatMergeResult dir destId sourceId succeeded attempt total =
@@ -336,10 +337,17 @@ targetDependencies moduleToTarget target =
   Set.fromList
     [ targetKeyId depKey
     | moduleName <- Set.toList target.otDependsOn
-    , Just depKey <- [HM.lookup moduleName moduleToTarget]
+    , Just assignment <- [HM.lookup moduleName moduleToTarget]
+    , depKey <- assignmentTargetKeys assignment
     , let depId = targetKeyId depKey
     , depId /= target.otKeyId
     ]
+
+assignmentTargetKeys :: TargetKeyOutput -> [TargetKeyOutput]
+assignmentTargetKeys assignment =
+  case assignment of
+    ExternalTargetOutput _ -> []
+    key -> [key]
 
 invertDependencies :: HashMap TargetNodeId (Set TargetNodeId) -> HashMap TargetNodeId (Set TargetNodeId)
 invertDependencies deps =
