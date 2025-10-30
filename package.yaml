@@ -76,6 +76,7 @@ library:
   source-dirs: src
   other-modules:
     - BuildGraph.Directory.TH
+    - BuildGraph.ModuleTargetOverrides
   ghc-options:
   - -fwrite-ide-info
   - -hiedir test/TestData/.hiefiles
