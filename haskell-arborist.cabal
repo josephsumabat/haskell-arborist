@@ -141,6 +141,12 @@ library
     , unliftio
     , unordered-containers ==0.2.*
   default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)
@@ -206,6 +212,12 @@ executable haskell-arborist
     , unliftio
     , unordered-containers ==0.2.*
   default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)
@@ -282,6 +294,12 @@ test-suite haskell-arborist-test
     , unliftio
     , unordered-containers ==0.2.*
   default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
   if flag(dev)
     ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
   if flag(par)

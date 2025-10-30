@@ -39,6 +39,7 @@ data DumpTargetGraphOptions = DumpTargetGraphOptions
   { rootDir :: FilePath
   , srcDirs :: [FilePath]
   , recursiveTargetDirs :: [FilePath]
+  , overrideMapPath :: Maybe FilePath
   }
 
 data GroupCandidatesOptions = GroupCandidatesOptions
@@ -145,6 +146,13 @@ commandParser =
                   <> Opt.help "Directory to treat as a recursive target (may be provided multiple times)"
               )
           )
+        <*> Opt.optional
+          ( Opt.strOption
+              ( Opt.long "module-target-overrides"
+                  <> Opt.metavar "FILE"
+                  <> Opt.help "JSON file containing module target overrides"
+              )
+          )
 
     groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
     groupCandidatesOptionsParser =
@@ -176,9 +184,17 @@ commandParser =
           )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
-runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs} = do
+runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs, overrideMapPath} = do
   let effectiveSrcDirs = if null srcDirs then [rootDir] else srcDirs
-  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs Nothing
+  overrides <-
+    case overrideMapPath of
+      Nothing -> pure Nothing
+      Just path -> do
+        bytes <- BL8.readFile path
+        case Aeson.eitherDecode bytes of
+          Left err -> die ("Failed to parse module target overrides from " <> path <> ": " <> err)
+          Right parsed -> pure (Just parsed)
+  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs overrides
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))

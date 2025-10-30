@@ -45,27 +45,26 @@ dependencies:
   - regex-tdfa
   - raw-strings-qq
 
-
 default-extensions:
-- BangPatterns
-- DataKinds
-- DeriveGeneric
-- DuplicateRecordFields
-- EmptyCase
-- FlexibleContexts
-- ImportQualifiedPost
-- LambdaCase
-- NamedFieldPuns
-- NoFieldSelectors
-- OverloadedRecordDot
-- OverloadedStrings
-- PatternSynonyms
-- RankNTypes
-- ScopedTypeVariables
-- TupleSections
-- TypeApplications
-- TypeOperators
-- ViewPatterns
+  - BangPatterns
+  - DataKinds
+  - DeriveGeneric
+  - DuplicateRecordFields
+  - EmptyCase
+  - FlexibleContexts
+  - ImportQualifiedPost
+  - LambdaCase
+  - NamedFieldPuns
+  - NoFieldSelectors
+  - OverloadedRecordDot
+  - OverloadedStrings
+  - PatternSynonyms
+  - RankNTypes
+  - ScopedTypeVariables
+  - TupleSections
+  - TypeApplications
+  - TypeOperators
+  - ViewPatterns
 
 ghc-options:
   - -Wall
@@ -78,21 +77,21 @@ library:
     - BuildGraph.Directory.TH
     - BuildGraph.ModuleTargetOverrides
   ghc-options:
-  - -fwrite-ide-info
-  - -hiedir test/TestData/.hiefiles
+    - -fwrite-ide-info
+    - -hiedir test/TestData/.hiefiles
 
 executable:
   source-dirs: app
   main: Main.hs
   dependencies:
-  - haskell-arborist
-  - optparse-applicative
+    - haskell-arborist
+    - optparse-applicative
 
 tests:
   haskell-arborist-test:
     dependencies:
-    - haskell-arborist
-    - hspec-golden
+      - haskell-arborist
+      - hspec-golden
     defaults: hspec/hspec@main
     ghc-options:
       - -fwrite-ide-info
@@ -109,13 +108,26 @@ flags:
     default: false
 
 when:
+  # Enable TypeAbstractions only on GHC >= 9.6, and provide a CPP macro.
+  - condition: impl(ghc >= 9.8.1)
+    default-extensions:
+      - TypeAbstractions
+    cpp-options:
+      - -DHAS_TYPEABSTRACTIONS
+
+  # Older GHCs: provide a negative macro if you want to guard code paths.
+  - condition: impl(ghc < 9.8.1)
+    cpp-options:
+      - -DNO_TYPEABSTRACTIONS
+
   - condition: flag(dev)
     ghc-options:
-    - -fwrite-ide-info
-    - -hiedir .hiefiles
-    - -fdefer-type-errors
-    - -fno-defer-typed-holes
-    - -Werror=deferred-type-errors
-    - -Werror=deferred-out-of-scope-variables
+      - -fwrite-ide-info
+      - -hiedir .hiefiles
+      - -fdefer-type-errors
+      - -fno-defer-typed-holes
+      - -Werror=deferred-type-errors
+      - -Werror=deferred-out-of-scope-variables
+
   - condition: flag(par)
     ghc-options: -O2 -threaded -rtsopts
