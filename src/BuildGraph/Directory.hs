@@ -1,8 +1,8 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -10,6 +10,7 @@
 
 module BuildGraph.Directory where
 
+import Arborist.Debug.Trace
 import Arborist.Files (ModFileMap, buildModuleFileMap)
 import Arborist.GlobImports (globImportModules)
 import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
@@ -17,49 +18,48 @@ import BuildGraph.Directory.TH (targetKeyTagModifier)
 import BuildGraph.ModuleTargetOverrides (
   ModuleTargetOverrides (..),
   TargetOverride (..),
-  emptyTargetOverrides
+  emptyTargetOverrides,
  )
 import Control.Applicative ((<|>))
 import Control.Monad (foldM)
 import Data.Aeson (SumEncoding (..))
 import Data.Aeson.TH (Options (..), defaultOptions, deriveJSON)
 import Data.ByteString qualified as BS
-import Data.Graph (SCC (..), stronglyConnComp)
-import Data.List (foldl')
-import Data.List qualified as List
-import Data.Ord (comparing)
 import Data.Function ((&))
+import Data.Graph (SCC (..), stronglyConnComp)
+import Data.HashMap.Lazy qualified as Map
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
+import Data.List (foldl')
+import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe, maybeToList)
+import Data.Ord (comparing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import Debug.Trace
 import GHC.Generics (Generic)
 import HaskellAnalyzer (parsePrg)
+import Hir.Parse
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
-import System.Directory (makeAbsolute)
-import System.FilePath
-  ( dropTrailingPathSeparator
-  , isAbsolute
-  , makeRelative
-  , normalise
-  , splitDirectories
-  , takeDirectory
-  , (</>)
-  )
 import Optics ((.~))
 import Optics.TH (makeFieldLabelsNoPrefix)
-import qualified Data.HashMap.Lazy as Map
-import Arborist.Debug.Trace
-import Hir.Parse
-import Debug.Trace
+import System.Directory (makeAbsolute)
+import System.FilePath (
+  dropTrailingPathSeparator,
+  isAbsolute,
+  makeRelative,
+  normalise,
+  splitDirectories,
+  takeDirectory,
+  (</>),
+ )
 
 -- | Error cases encountered while attempting to build a maximal acyclic graph
 data ModuleCycleEdge = ModuleCycleEdge
@@ -142,7 +142,7 @@ data TargetKeyOutput
   | ExternalTargetOutput Text
   deriving (Eq, Show, Generic)
 
-$(deriveJSON
+$( deriveJSON
     defaultOptions
       { sumEncoding = TaggedObject {tagFieldName = "type", contentsFieldName = "name"}
       , constructorTagModifier = targetKeyTagModifier
@@ -209,8 +209,8 @@ buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTarget
     case targetDirs of
       [] -> loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
       _ -> loadAllPrograms [rootDir]
-  --programIndex <- loadProgramIndex localModFileMap fullModFileMap
-  --programIndex <- loadAllPrograms [rootDir]
+  -- programIndex <- loadProgramIndex localModFileMap fullModFileMap
+  -- programIndex <- loadAllPrograms [rootDir]
   recursiveDirs <- mapM (resolveRecursiveTargetDir rootInfo) recursiveTargetDirs
   let recursiveDirSet = Set.fromList recursiveDirs
 
@@ -219,7 +219,7 @@ buildGraphFromDirectoriesWithRecursiveTargets rootDir targetDirs recursiveTarget
 loadSimpleProgramIndex :: [FilePath] -> ModFileMap -> IO ProgramIndex
 loadSimpleProgramIndex files fullModFileMap =
   foldM
-    (\acc file -> do
+    ( \acc file -> do
         program <- parseProgramFromFile file
         gatherTransitiveDeps acc program fullModFileMap
     )
@@ -298,7 +298,7 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overr
           overrideRaw
       assignments =
         mapMaybe
-          (\(moduleName, info) -> do
+          ( \(moduleName, info) -> do
               (targetKey, targetDir) <- moduleTargetAssignment preassignedTargets info
               pure (moduleName, targetKey, targetDir)
           )
@@ -311,7 +311,8 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overr
           ]
 
       targets =
-        HM.fromListWith mergeTargets
+        HM.fromListWith
+          mergeTargets
           [ ( targetKey
             , TargetState
                 { key = targetKey
@@ -321,7 +322,7 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overr
             )
           | (moduleName, targetKey, targetDir) <- assignments
           ]
-   in  BuildState {moduleInfos, moduleToTarget, targets, rootInfo, preassignedTargets}
+   in BuildState {moduleInfos, moduleToTarget, targets, rootInfo, preassignedTargets}
  where
   toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
   toInfo moduleName program =
@@ -329,7 +330,6 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overr
       Just filePath ->
         localInfo filePath
       Nothing -> externalInfo
-
    where
     localInfo filePath =
       ModuleInfo
@@ -353,12 +353,12 @@ initialBuildState rootInfo programIndex fullModFileMap recursiveTargetDirs overr
   moduleTargetAssignment overridesMap info
     | HM.member info.name overridesMap = Nothing
     | otherwise =
-      case info.location of
-        LocalModule moduleDir ->
-          case findRecursiveTargetDir recursiveTargetDirs moduleDir of
-            Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
-            Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
-        ExternalModule -> Nothing
+        case info.location of
+          LocalModule moduleDir ->
+            case findRecursiveTargetDir recursiveTargetDirs moduleDir of
+              Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
+              Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
+          ExternalModule -> Nothing
 
   mergeTargets :: TargetState -> TargetState -> TargetState
   mergeTargets left right =
@@ -391,7 +391,6 @@ moduleDirectory rootInfo filePath =
   let dirPath = normalise (takeDirectory filePath)
    in DirName (directoryText rootInfo dirPath)
 
-
 normalizeRootDirectory :: FilePath -> IO RootDirectory
 normalizeRootDirectory path = do
   absRoot <- makeAbsolute path
@@ -411,7 +410,7 @@ resolveSourceDir root dir = do
         else pure (normalise (root.rootPath </> dir))
     else pure normalizedAbs
  where
- isOutsideRoot rel = ".." `List.isPrefixOf` rel
+  isOutsideRoot rel = ".." `List.isPrefixOf` rel
 
 resolveRecursiveTargetDir :: RootDirectory -> FilePath -> IO DirName
 resolveRecursiveTargetDir root dir = do
@@ -472,9 +471,9 @@ moduleCausesCycle state cycleSet key moduleName =
     Nothing -> False
     Just info ->
       any
-        (\dep -> case HM.lookup dep state.moduleToTarget of
-          Just depKey -> depKey /= key && Set.member depKey cycleSet
-          Nothing -> False
+        ( \dep -> case HM.lookup dep state.moduleToTarget of
+            Just depKey -> depKey /= key && Set.member depKey cycleSet
+            Nothing -> False
         )
         (Set.toList info.imports)
 
@@ -488,7 +487,6 @@ splitModule parentKey moduleName state =
             if Set.null remainingModules
               then HM.delete parentKey state.targets
               else HM.insert parentKey (withModules parent remainingModules) state.targets
-
        in case HM.lookup moduleName state.moduleInfos of
             Nothing -> state
             Just moduleInfo ->
@@ -563,7 +561,6 @@ pickCycleEdges deps edgeMap state (cycleVertices : _) =
     vertex : _ -> vertex
     [] -> DirectoryTarget (DirName (T.pack "Unknown"))
 
-
 targetModules :: BuildState -> TargetKey -> [Hir.ModuleText]
 targetModules state key =
   case HM.lookup key state.targets of
@@ -575,7 +572,7 @@ targetModules state key =
 computeTargetDependencies :: BuildState -> (HashMap TargetKey (Set TargetKey), HashMap (TargetKey, TargetKey) ModuleCycleEdge)
 computeTargetDependencies state =
   HM.foldlWithKey'
-    (\(depMap, edgeMap) key targetState ->
+    ( \(depMap, edgeMap) key targetState ->
         let (depsForKey, edgesForKey) = collectDeps state key targetState
             depMap' = HM.insert key depsForKey depMap
             edgeMap' = HM.union edgeMap (HM.mapKeys (key,) edgesForKey)
@@ -587,17 +584,18 @@ computeTargetDependencies state =
 collectDeps :: BuildState -> TargetKey -> TargetState -> (Set TargetKey, HashMap TargetKey ModuleCycleEdge)
 collectDeps state key targetState =
   foldl'
-    (\(depSet, edgeMap) moduleName ->
+    ( \(depSet, edgeMap) moduleName ->
         case HM.lookup moduleName state.moduleInfos of
           Nothing -> (depSet, edgeMap)
           Just info ->
             foldl'
-              (\(accSet, accMap) depName ->
+              ( \(accSet, accMap) depName ->
                   case HM.lookup depName state.moduleToTarget of
-                    Just depKey | depKey /= key ->
-                      ( Set.insert depKey accSet
-                      , HM.insert depKey (ModuleCycleEdge moduleName depName) accMap
-                      )
+                    Just depKey
+                      | depKey /= key ->
+                          ( Set.insert depKey accSet
+                          , HM.insert depKey (ModuleCycleEdge moduleName depName) accMap
+                          )
                     _ -> (accSet, accMap)
               )
               (depSet, edgeMap)
@@ -765,9 +763,10 @@ directoryText root dirPath =
       relative = normalise relativeRaw
    in if relative == "." || null relative
         then root.rootLabel
-        else if isOutsideRoot relative
-          then T.pack dirPath
-          else pathToDot relative
+        else
+          if isOutsideRoot relative
+            then T.pack dirPath
+            else pathToDot relative
  where
   isOutsideRoot rel = ".." `List.isPrefixOf` rel
 

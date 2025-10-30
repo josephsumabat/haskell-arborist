@@ -1,23 +1,22 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Arborist.AutoQualifySpec (spec) where
 
-import Test.Hspec
-import Hir.Parse qualified as Parse
-import Arborist.AutoQualify (qualifyIdentifier)
-import Data.Edit (getChanges)
-import Data.Change (Change(..))
-import TestImport (getPrg)
 import AST qualified
 import AST.Haskell qualified as H
-import Hir.Types
+import Arborist.AutoQualify (qualifyIdentifier)
+import Data.Change (Change (..))
+import Data.Edit (getChanges)
 import Data.Either.Extra (fromRight)
+import Hir.Parse qualified as Parse
+import Hir.Types
+import Test.Hspec
+import TestImport (getPrg)
 
 spec :: Spec
 spec = do
   describe "qualifyDecl" $ do
-
     it "qualifies foo with module alias" $ do
       programs <- getPrg ["./test-data/auto-qualify/QualifyFooWithAlias.hs"]
       let [prog] = programs
@@ -34,7 +33,6 @@ spec = do
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "T.foo"
             _ -> expectationFailure $ show changes
-
         _ -> expectationFailure "Import or node not found"
 
     it "qualifies foo with qualified mpdule" $ do
@@ -53,5 +51,4 @@ spec = do
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "TestTypes.foo"
             _ -> expectationFailure $ show changes
-
         _ -> expectationFailure "Import or node not found"

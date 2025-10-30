@@ -67,7 +67,7 @@ renderImport imp =
 -- | Render a list of import items
 renderImportItems :: [Hir.ImportItem Hir.HirWrite] -> Text.Text
 renderImportItems items
-  | length items > 3 = 
+  | length items > 3 =
       "\n    " <> Text.intercalate ",\n    " (map renderImportItem items) <> "\n  "
   | otherwise = Text.intercalate ", " (map renderImportItem items)
 

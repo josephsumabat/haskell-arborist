@@ -1,17 +1,17 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Arborist.ModuleInfo
-  ( DirName (..)
-  , ModuleLocation (..)
-  , ModuleInfo (..)
-  , ModuleInfoCache (..)
-  , moduleInfoCacheFromMap
-  , moduleInfoCacheToMap
-  , readModuleInfoCache
-  , writeModuleInfoCache
-  , moduleTextToText
-  )
+module Arborist.ModuleInfo (
+  DirName (..),
+  ModuleLocation (..),
+  ModuleInfo (..),
+  ModuleInfoCache (..),
+  moduleInfoCacheFromMap,
+  moduleInfoCacheToMap,
+  readModuleInfoCache,
+  writeModuleInfoCache,
+  moduleTextToText,
+)
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), eitherDecode, encode, object, withObject, (.:), (.=))

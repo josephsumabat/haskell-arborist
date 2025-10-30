@@ -5,10 +5,10 @@ module Arborist.Rewrite.Apply (
   writeMultipleEdits,
 ) where
 
-import Data.Edit (Edit)
-import Data.Text.IO qualified as TIO
-import Data.Text (Text)
 import Arborist.Rewrite.Core (applyEdit, applyMultipleEdits)
+import Data.Edit (Edit)
+import Data.Text (Text)
+import Data.Text.IO qualified as TIO
 
 -- | Apply an edit to a file and rewrite it
 writeEdit :: FilePath -> Edit -> IO ()

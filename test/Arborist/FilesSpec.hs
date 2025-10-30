@@ -1,11 +1,11 @@
 module Arborist.FilesSpec (spec) where
 
-import Data.List
-import System.Directory (makeRelativeToCurrentDirectory)
 import Arborist.Files
 import Data.HashMap.Strict qualified as Map
+import Data.List
 import Data.Text qualified as T
 import Hir.Types (ModuleText (..))
+import System.Directory (makeRelativeToCurrentDirectory)
 import Test.Hspec
 import Test.Hspec.Golden (defaultGolden)
 import TestImport

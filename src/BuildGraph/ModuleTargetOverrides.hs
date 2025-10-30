@@ -2,12 +2,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module BuildGraph.ModuleTargetOverrides
-  ( TargetOverride (..)
-  , ModuleTargetOverrides (..)
-  , emptyTargetOverrides
-  , lookupTargetOverride
-  )
+module BuildGraph.ModuleTargetOverrides (
+  TargetOverride (..),
+  ModuleTargetOverrides (..),
+  emptyTargetOverrides,
+  lookupTargetOverride,
+)
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), withObject)

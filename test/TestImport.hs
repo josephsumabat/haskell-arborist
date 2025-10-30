@@ -15,8 +15,8 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as Text
 import GHC.IO (unsafeInterleaveIO)
 import HaskellAnalyzer
-import Hir.Types qualified as Hir
 import Hir.Read.Types qualified as Hir.Read
+import Hir.Types qualified as Hir
 
 testDataDir :: FilePath
 testDataDir = "./test-data/base-data"

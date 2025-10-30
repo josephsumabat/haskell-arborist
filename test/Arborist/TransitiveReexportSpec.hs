@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
 module Arborist.TransitiveReexportSpec (spec) where
 
 import Arborist.Files
@@ -6,12 +7,12 @@ import Arborist.ProgramIndex
 import Arborist.Scope.Global
 import Arborist.Scope.Types
 import Data.HashMap.Strict qualified as Map
+import HaskellAnalyzer (parsePrg)
 import Hir.Parse qualified as Hir
 import Hir.Types qualified as HirT
 import System.FilePath
 import Test.Hspec
 import TestImport
-import HaskellAnalyzer (parsePrg)
 
 spec :: Spec
 spec = do
@@ -81,4 +82,4 @@ spec = do
         Nothing -> expectationFailure "myFunc2 not in scope"
         Just importMap -> do
           let importMods = map (.mod) (Map.keys importMap)
-          importMods `shouldSatisfy` (elem (Hir.parseModuleTextFromText "B3")) 
+          importMods `shouldSatisfy` (elem (Hir.parseModuleTextFromText "B3"))

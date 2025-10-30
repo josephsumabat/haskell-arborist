@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 
 -- | Directory Cycle Detection and Breaking Tool
--- 
+--
 -- This module provides functionality to:
 -- 1. Detect dependency cycles at the directory level
 -- 2. Analyze which modules could be moved to break cycles
@@ -12,41 +12,40 @@
 -- - runDetectCycles: Uses hardcoded configuration
 -- - runDetectCyclesWithConfig: Custom configuration
 -- - main: Command line interface
-
 module Scripts.DirCycles where
 
 import Arborist.Files
 import Arborist.ProgramIndex
 import Arborist.Refactor.Module (renameModule)
 import Arborist.Rewrite (applySourceEdit)
-import Data.SourceEdit (SourceEdit)
 import Control.Monad (forM)
 import Data.ByteString qualified as BS
+import Data.Graph (SCC (..), stronglyConnComp)
 import Data.HashMap.Lazy qualified as Map
 import Data.List qualified as List
-import Data.Maybe (mapMaybe, fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Set qualified as Set
-import Data.Text.Encoding qualified as TE
+import Data.SourceEdit (SourceEdit)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import HaskellAnalyzer
 import Hir.Parse
 import Hir.Parse (parseModuleTextFromText)
 import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
-import HaskellAnalyzer
-import Data.Graph (SCC(..), stronglyConnComp)
+import ModUtils (moduleToPath)
+import System.Directory qualified as Dir
 import System.Environment (getArgs)
 import System.FilePath (takeDirectory)
 import System.FilePath qualified as FP
-import System.Directory qualified as Dir
-import ModUtils (moduleToPath)
 
 -- Keep minimal types needed for this script
-data Cycle = Cycle { cyclePath :: [FilePath], cycleStart :: FilePath } deriving (Show, Eq, Ord)
+data Cycle = Cycle {cyclePath :: [FilePath], cycleStart :: FilePath} deriving (Show, Eq, Ord)
 
 -- | Represents a module dependency graph
 data ModuleGraph = ModuleGraph
   { graphNodes :: Map.HashMap Hir.ModuleText ModuleNode
-  , graphEdges :: Map.HashMap Hir.ModuleText (Set.Set Hir.ModuleText)  -- Module -> Set of modules it imports
+  , graphEdges :: Map.HashMap Hir.ModuleText (Set.Set Hir.ModuleText) -- Module -> Set of modules it imports
   }
   deriving (Show)
 
@@ -59,7 +58,7 @@ data ModuleNode = ModuleNode
   deriving (Show, Eq)
 
 -- | Intermediate representation for pretty-printing a path of modules
-newtype ModulePathView = ModulePathView { moduleSequence :: [Hir.ModuleText] }
+newtype ModulePathView = ModulePathView {moduleSequence :: [Hir.ModuleText]}
   deriving (Eq, Ord, Show)
 
 -- | Render a module path like "A.B -> C.D -> E.F"
@@ -70,18 +69,24 @@ render (ModulePathView mods) =
 -- | Build module graph from program index
 buildModuleGraph :: ProgramIndex -> ModuleGraph
 buildModuleGraph programIndex =
-  let nodes = Map.mapWithKey (\moduleName program ->
-        ModuleNode
-          { moduleName = moduleName
-          , moduleDirectory = moduleToDirectory moduleName
-          , moduleImports = (.mod) <$> program.imports
-          }
-        ) programIndex
-      
+  let nodes =
+        Map.mapWithKey
+          ( \moduleName program ->
+              ModuleNode
+                { moduleName = moduleName
+                , moduleDirectory = moduleToDirectory moduleName
+                , moduleImports = (.mod) <$> program.imports
+                }
+          )
+          programIndex
+
       -- Build edges: module -> set of modules it imports
-      edges = Map.mapWithKey (\moduleName program ->
-        Set.fromList $ (.mod) <$> program.imports
-        ) programIndex
+      edges =
+        Map.mapWithKey
+          ( \moduleName program ->
+              Set.fromList $ (.mod) <$> program.imports
+          )
+          programIndex
    in ModuleGraph
         { graphNodes = nodes
         , graphEdges = edges
@@ -133,7 +138,7 @@ dirSCCs dirGraph =
             (Set.fromList (Map.keys dirGraph))
             (Set.unions (Map.elems dirGraph))
       depsOf n = Set.toList (Map.lookupDefault Set.empty n dirGraph)
-      sccInput = [ (n, n, depsOf n) | n <- allNodes ]
+      sccInput = [(n, n, depsOf n) | n <- allNodes]
    in stronglyConnComp sccInput
 
 -- | Extract one simple cycle path from an SCC, if any
@@ -147,9 +152,9 @@ extractOneCycle dirGraph allowed start = go start [start] (Set.singleton start)
           Nothing ->
             let unvisited = filter (`Set.notMember` visited) (Set.toList nexts)
              in foldr
-                  (\n acc -> case acc of
-                    Just p -> Just p
-                    Nothing -> go n (path ++ [n]) (Set.insert n visited)
+                  ( \n acc -> case acc of
+                      Just p -> Just p
+                      Nothing -> go n (path ++ [n]) (Set.insert n visited)
                   )
                   Nothing
                   unvisited
@@ -160,46 +165,48 @@ extractOneCycle dirGraph allowed start = go start [start] (Set.singleton start)
 findCrossModulePaths :: ModuleGraph -> FilePath -> FilePath -> Int -> Int -> [[Hir.ModuleText]]
 findCrossModulePaths mg dirA dirB maxDepth maxPaths =
   let
-      -- Normalize directory paths to avoid trailing-slash or ./ issues
-      normalizeDir :: FilePath -> FilePath
-      normalizeDir = FP.normalise . FP.dropTrailingPathSeparator
+    -- Normalize directory paths to avoid trailing-slash or ./ issues
+    normalizeDir :: FilePath -> FilePath
+    normalizeDir = FP.normalise . FP.dropTrailingPathSeparator
 
-      dirA' = normalizeDir dirA
-      dirB' = normalizeDir dirB
+    dirA' = normalizeDir dirA
+    dirB' = normalizeDir dirB
 
-      nodes = mg.graphNodes
-      dirOf m = maybe (moduleToDirectory m) (.moduleDirectory) (Map.lookup m nodes)
-      sources = [ m | (m, n) <- Map.toList nodes, normalizeDir n.moduleDirectory == dirA' ]
-      neighbors m = Set.toList (Map.lookupDefault Set.empty m mg.graphEdges)
+    nodes = mg.graphNodes
+    dirOf m = maybe (moduleToDirectory m) (.moduleDirectory) (Map.lookup m nodes)
+    sources = [m | (m, n) <- Map.toList nodes, normalizeDir n.moduleDirectory == dirA']
+    neighbors m = Set.toList (Map.lookupDefault Set.empty m mg.graphEdges)
 
-      dfs :: Hir.ModuleText -> Int -> Set.Set Hir.ModuleText -> Int -> ([[Hir.ModuleText]], Int)
-      dfs curr depth visited remaining
-        | remaining <= 0 = ([], 0)
-        | normalizeDir (dirOf curr) == dirB' = ([[curr]], remaining - 1)
-        | depth <= 0 = ([], remaining)
-        | otherwise =
-            let nexts = filter (\n -> not (Set.member n visited)) (neighbors curr)
-             in foldl
-                  (\(accPaths, remCnt) n ->
-                      if remCnt <= 0 then (accPaths, 0)
+    dfs :: Hir.ModuleText -> Int -> Set.Set Hir.ModuleText -> Int -> ([[Hir.ModuleText]], Int)
+    dfs curr depth visited remaining
+      | remaining <= 0 = ([], 0)
+      | normalizeDir (dirOf curr) == dirB' = ([[curr]], remaining - 1)
+      | depth <= 0 = ([], remaining)
+      | otherwise =
+          let nexts = filter (\n -> not (Set.member n visited)) (neighbors curr)
+           in foldl
+                ( \(accPaths, remCnt) n ->
+                    if remCnt <= 0
+                      then (accPaths, 0)
                       else
                         let (childPaths, remCnt') = dfs n (depth - 1) (Set.insert curr visited) remCnt
                             withCurr = map (curr :) childPaths
                          in (accPaths ++ withCurr, remCnt')
-                  )
-                  ([], remaining)
-                  nexts
+                )
+                ([], remaining)
+                nexts
 
-      collectFrom :: Int -> [Hir.ModuleText] -> ([[Hir.ModuleText]], Int)
-      collectFrom remaining [] = ([], remaining)
-      collectFrom remaining (s:ss)
-        | remaining <= 0 = ([], 0)
-        | otherwise =
-            let (p1, r1) = dfs s maxDepth Set.empty remaining
-                (p2, r2) = collectFrom r1 ss
-             in (p1 ++ p2, r2)
-      (paths, _) = collectFrom maxPaths sources
-   in paths
+    collectFrom :: Int -> [Hir.ModuleText] -> ([[Hir.ModuleText]], Int)
+    collectFrom remaining [] = ([], remaining)
+    collectFrom remaining (s : ss)
+      | remaining <= 0 = ([], 0)
+      | otherwise =
+          let (p1, r1) = dfs s maxDepth Set.empty remaining
+              (p2, r2) = collectFrom r1 ss
+           in (p1 ++ p2, r2)
+    (paths, _) = collectFrom maxPaths sources
+   in
+    paths
 
 -- | Determine whether a directory matches any of the target directories or prefixes
 matchesTargets :: [FilePath] -> [FilePath] -> FilePath -> Bool
@@ -242,8 +249,8 @@ runDetectCycles = do
 runRenameModule :: IO ()
 runRenameModule = do
   -- Adjust this list of (fromModule, toModule) tuples
-  let moduleRenames = 
-        [("Mercury.BusinessBanking.Onboarding.OnboarderAttribute","Mercury.BusinessBanking.Onboarding.Core.OnboarderAttribute")
+  let moduleRenames =
+        [ ("Mercury.BusinessBanking.Onboarding.OnboarderAttribute", "Mercury.BusinessBanking.Onboarding.Core.OnboarderAttribute")
         ]
 
   -- Discover modules under these source roots
@@ -277,8 +284,8 @@ runPruneEdges :: IO ()
 runPruneEdges = do
   -- Local variables
   let sourceRoots = ["../mercury-web-backend/src"]
-      targetDir = "Mercury/FakeData"                 -- directory to pick the last module from
-      newDir = "My.New.Module"                       -- new module prefix
+      targetDir = "Mercury/FakeData" -- directory to pick the last module from
+      newDir = "My.New.Module" -- new module prefix
 
       -- A sample path like:
       -- Mercury.FakeData.Populate.IntraMercuryTransfers
@@ -332,7 +339,6 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
       let oldMod = fromMaybe (error "No modules in path") (listToMaybe (reverse mods))
       pure (renameIntoNewDir programIndex modFileMap oldBaseAbs newBaseAbs newDir oldMod)
     Just oldMod -> pure (renameIntoNewDir programIndex modFileMap oldBaseAbs newBaseAbs newDir oldMod)
-
  where
   -- Construct a SourceEdit to move a module to a new prefix, keeping its leaf name
   renameIntoNewDir :: ProgramIndex -> ModFileMap -> FilePath -> FilePath -> String -> Hir.ModuleText -> SourceEdit
@@ -345,7 +351,7 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
 
         desiredNewDir' :: String
         desiredNewDir' = case reverse desiredNewDir of
-          ('.':rest) -> reverse rest
+          ('.' : rest) -> reverse rest
           _ -> desiredNewDir
 
         newModNameStr :: T.Text
@@ -366,41 +372,45 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
 renameModulePrefix :: ProgramIndex -> ModFileMap -> FilePath -> FilePath -> String -> String -> SourceEdit
 renameModulePrefix prgIndex modMap oldBaseAbs newBaseAbs oldPrefix newPrefix =
   let
-      -- Normalize prefixes to handle trailing dots
-      normalizePrefix :: String -> String
-      normalizePrefix = reverse . dropWhile (== '.') . reverse
+    -- Normalize prefixes to handle trailing dots
+    normalizePrefix :: String -> String
+    normalizePrefix = reverse . dropWhile (== '.') . reverse
 
-      oldPrefix' = normalizePrefix oldPrefix
-      newPrefix' = normalizePrefix newPrefix
+    oldPrefix' = normalizePrefix oldPrefix
+    newPrefix' = normalizePrefix newPrefix
 
-      -- Find all modules that start with the old prefix (including exact matches)
-      matchingModules :: [Hir.ModuleText]
-      matchingModules = 
-        let oldPrefixText = T.pack oldPrefix'
-         in [ modText | modText <- Map.keys prgIndex
-             , T.isPrefixOf oldPrefixText modText.text
-             ]
+    -- Find all modules that start with the old prefix (including exact matches)
+    matchingModules :: [Hir.ModuleText]
+    matchingModules =
+      let oldPrefixText = T.pack oldPrefix'
+       in [ modText
+          | modText <- Map.keys prgIndex
+          , T.isPrefixOf oldPrefixText modText.text
+          ]
 
-      -- For each matching module, create a rename operation
-      renameOperations :: [SourceEdit]
-      renameOperations = 
-        [ let
-              -- Extract the suffix (everything after the old prefix)
-              suffix = T.drop (T.length (T.pack oldPrefix')) modText.text
-              -- Remove leading dot if present (handle empty suffix case)
-              suffix' = if T.null suffix 
-                        then suffix  -- Empty suffix, no leading dot to remove
-                        else if maybe False (== '.') (listToMaybe (T.unpack suffix)) then T.tail suffix else suffix
-              -- Construct new module name
-              newModNameStr = if T.null suffix' 
-                             then T.pack newPrefix'
-                             else T.pack newPrefix' <> T.pack "." <> suffix'
-              newMod = parseModuleTextFromText newModNameStr
-           in renameModule prgIndex modMap oldBaseAbs newBaseAbs modText newMod
-        | modText <- matchingModules
-        ]
-
-   in mconcat renameOperations
+    -- For each matching module, create a rename operation
+    renameOperations :: [SourceEdit]
+    renameOperations =
+      [ let
+          -- Extract the suffix (everything after the old prefix)
+          suffix = T.drop (T.length (T.pack oldPrefix')) modText.text
+          -- Remove leading dot if present (handle empty suffix case)
+          suffix' =
+            if T.null suffix
+              then suffix -- Empty suffix, no leading dot to remove
+              else if maybe False (== '.') (listToMaybe (T.unpack suffix)) then T.tail suffix else suffix
+          -- Construct new module name
+          newModNameStr =
+            if T.null suffix'
+              then T.pack newPrefix'
+              else T.pack newPrefix' <> T.pack "." <> suffix'
+          newMod = parseModuleTextFromText newModNameStr
+         in
+          renameModule prgIndex modMap oldBaseAbs newBaseAbs modText newMod
+      | modText <- matchingModules
+      ]
+   in
+    mconcat renameOperations
 
 -- | Convenience wrapper to rename all modules matching a prefix to a new prefix
 -- Adjust the local variables to your scenario, then run to apply the renames.
@@ -431,4 +441,3 @@ runRenameModulePrefix = do
   -- Create SourceEdit for prefix rename and apply
   let sourceEdit = renameModulePrefix programIndex modFileMap oldBaseAbs newBaseAbs oldPrefix newPrefix
   applySourceEdit sourceEdit
-

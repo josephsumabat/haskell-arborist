@@ -1,23 +1,22 @@
-{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
 module Arborist.AutoImportSpec (spec) where
 
-import Test.Hspec
-import Hir.Parse qualified as Parse
-import Arborist.AutoImport (addDeclToImportEdit)
-import Data.Edit (getChanges)
-import Data.Change (Change(..))
-import TestImport (getPrg, getDecls)
 import AST qualified
 import AST.Haskell qualified as H
-import Hir.Types
+import Arborist.AutoImport (addDeclToImportEdit)
+import Data.Change (Change (..))
+import Data.Edit (getChanges)
 import Data.Either.Extra (fromRight)
+import Hir.Parse qualified as Parse
+import Hir.Types
+import Test.Hspec
+import TestImport (getDecls, getPrg)
 
 spec :: Spec
 spec = do
   describe "addDeclToImportEdit" $ do
-
     it "adds function to existing import list" $ do
       programs <- getPrg ["./test-data/auto-import/PartialImportExample.hs"]
       let [prog] = programs
@@ -38,7 +37,7 @@ spec = do
     it "adds class with (..) to empty import list" $ do
       importingPrograms <- getPrg ["./test-data/auto-import/ImportTestTypes.hs"]
       exportPrograms <- getPrg ["./test-data/auto-import/TestTypes.hs"]
-      
+
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
@@ -57,7 +56,7 @@ spec = do
     it "adds newtype with (..) to empty import list" $ do
       importingPrograms <- getPrg ["./test-data/auto-import/ImportTestTypes.hs"]
       exportPrograms <- getPrg ["./test-data/auto-import/TestTypes.hs"]
-      
+
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
@@ -76,7 +75,7 @@ spec = do
     it "adds data type with (..) to empty import list" $ do
       importingPrograms <- getPrg ["./test-data/auto-import/ImportTestTypes.hs"]
       exportPrograms <- getPrg ["./test-data/auto-import/TestTypes.hs"]
-      
+
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
@@ -95,7 +94,7 @@ spec = do
     it "adds regular function to empty import list" $ do
       importingPrograms <- getPrg ["./test-data/auto-import/ImportTestTypes.hs"]
       exportPrograms <- getPrg ["./test-data/auto-import/TestTypes.hs"]
-      
+
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
@@ -114,7 +113,7 @@ spec = do
     it "adds operator with parentheses to empty import list" $ do
       importingPrograms <- getPrg ["./test-data/auto-import/ImportTestTypes.hs"]
       exportPrograms <- getPrg ["./test-data/auto-import/TestTypes.hs"]
-      
+
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
@@ -123,7 +122,7 @@ spec = do
       case importNode of
         Just import' -> do
           let dynNode = AST.getDynNode import'
-              hirImport =  fromRight (error "Failed to parse import") $ Parse.parseImport import'
+              hirImport = fromRight (error "Failed to parse import") $ Parse.parseImport import'
               changes = getChanges (addDeclToImportEdit hirImport operatorDecl)
           case changes of
             [Change insertedText _] -> insertedText `shouldBe` "import TestTypes ((***))"

@@ -11,7 +11,7 @@ import Data.Edit (Edit)
 import Data.Edit qualified as Edit
 import Data.List (foldl', sortOn)
 import Data.Ord qualified as Ord
-import Data.Pos (Pos(..))
+import Data.Pos (Pos (..))
 import Data.Range as Range (Range (..))
 import Data.Text (Text)
 import Data.Text qualified as T

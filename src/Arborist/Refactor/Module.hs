@@ -3,25 +3,25 @@ module Arborist.Refactor.Module (
   findImportingModules,
 ) where
 
-import Arborist.ProgramIndex (ProgramIndex)
-import Arborist.Files (ModFileMap)
-import Arborist.Rewrite (rewriteNode)
 import AST qualified
 import AST.Haskell qualified as H
+import Arborist.Files (ModFileMap)
+import Arborist.ProgramIndex (ProgramIndex)
+import Arborist.Rewrite (rewriteNode)
+import Control.Applicative ((<|>))
 import Data.Edit (Edit)
+import Data.Either.Extra (eitherToMaybe)
 import Data.HashMap.Lazy qualified as Map
 import Data.HashMap.Strict qualified as HashMap
-import Data.SourceEdit (FsEdit (..), SourceEdit (..))
 import Data.Path qualified as Path
-import Data.Either.Extra (eitherToMaybe)
+import Data.SourceEdit (FsEdit (..), SourceEdit (..))
 import Hir.Parse qualified as Hir.Parse
-import Hir.Render.Import qualified as Render
 import Hir.Read.Types qualified as Hir.Read
-import Hir.Write.Types qualified as Hir.Write
+import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
+import Hir.Write.Types qualified as Hir.Write
 import ModUtils qualified as ModUtils
 import System.FilePath qualified as FilePath
-import Control.Applicative ((<|>))
 
 -- | Find all modules in the program index that import the given module.
 findImportingModules :: ProgramIndex -> Hir.ModuleText -> [Hir.ModuleText]
@@ -44,8 +44,9 @@ renameModule prgIndex modFileMap oldBaseAbs newBaseAbs oldMod newMod =
     -- Prefer entries from the provided ModFileMap; fall back to inferred path
     pathForModule :: Hir.ModuleText -> Path.AbsPath
     pathForModule m =
-      let file = Map.lookup m modFileMap
-                  <|> Map.lookup m fallbackMap
+      let file =
+            Map.lookup m modFileMap
+              <|> Map.lookup m fallbackMap
           absolutize p =
             let p' = if FilePath.isAbsolute p then p else FilePath.normalise (FilePath.combine oldBaseAbs p)
              in Path.unsafeFilePathToAbs p'
@@ -106,16 +107,16 @@ renameModule prgIndex modFileMap oldBaseAbs newBaseAbs oldMod newMod =
     -- Accumulate file edits keyed by file path
     fileEditsMap :: HashMap.HashMap Path.AbsPath Edit
     fileEditsMap =
-      let base = HashMap.fromList [ (pathForModule m, e) | (m, e) <- importEditsByMod ]
+      let base = HashMap.fromList [(pathForModule m, e) | (m, e) <- importEditsByMod]
           base' = case headerEdit of
-                    Nothing -> base
-                    Just e  -> HashMap.insertWith (<>) (pathForModule oldMod) e base
+            Nothing -> base
+            Just e -> HashMap.insertWith (<>) (pathForModule oldMod) e base
        in base'
 
     moveEdits :: [FsEdit]
     moveEdits =
       if oldMod == newMod
         then []
-        else [ FsEditMoveFile { src = pathForModule oldMod, dst = pathForModuleNewBase newMod } ]
-  in
-    SourceEdit { fileEdits = fileEditsMap, fsEdits = moveEdits }
+        else [FsEditMoveFile {src = pathForModule oldMod, dst = pathForModuleNewBase newMod}]
+   in
+    SourceEdit {fileEdits = fileEditsMap, fsEdits = moveEdits}

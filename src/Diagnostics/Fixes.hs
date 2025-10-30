@@ -13,8 +13,8 @@ import Data.Edit as Edit
 import Data.HashMap.Lazy qualified as Map
 import Data.LineCol (LineCol (..))
 import Data.LineColRange (LineColRange (..))
-import Data.List (nubBy, find, findIndex, scanl)
-import Data.Maybe (mapMaybe, listToMaybe, isJust)
+import Data.List (find, findIndex, nubBy, scanl)
+import Data.Maybe (isJust, listToMaybe, mapMaybe)
 import Data.Path qualified as Path
 import Data.Pos (Pos (..))
 import Data.Range (Range (..))
@@ -55,11 +55,11 @@ fixRedundantImports = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isRedundantImportDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " redundant import diagnostics"
-  
+
   -- Deduplicate diagnostics based on file path, range, and message
   let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
   putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique redundant import diagnostics"
-  
+
   -- Process each diagnostic and collect edits in a Map
   editsMap <- foldM collectEdit Map.empty deduplicatedDiagnostics
   -- Debug: show what edits are being collected
@@ -93,13 +93,13 @@ fixNotInScope = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isNotInScopeDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-in-scope diagnostics"
-  
+
   -- Deduplicate diagnostics based on file path, range, and message
   let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
   putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique not-in-scope diagnostics"
 
   -- Collect unique files from deduplicated diagnostics
-  let uniqueFiles = Set.fromList [ filePath | Diagnostic{range = FileWith filePath _} <- deduplicatedDiagnostics ]
+  let uniqueFiles = Set.fromList [filePath | Diagnostic {range = FileWith filePath _} <- deduplicatedDiagnostics]
 
   -- Process each unique file and collect edits in a Map
   editsMap <- foldM collectImportEdit Map.empty (Set.toList uniqueFiles)
@@ -115,8 +115,7 @@ fixNotInScope = do
   -- Local list of imports to insert (deduplicated before insertion)
   importsToInsert :: [Text.Text]
   importsToInsert =
-    [
-      "Test.Mercury.Assertions"
+    [ "Test.Mercury.Assertions"
     ]
 
   collectImportEdit :: Map.HashMap Path.AbsPath [Edit] -> Path.AbsPath -> IO (Map.HashMap Path.AbsPath [Edit])
@@ -177,11 +176,11 @@ fixNotExported = do
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isNotExportedDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " not-exported diagnostics"
-  
+
   -- Deduplicate diagnostics based on file path, range, and message
   let deduplicatedDiagnostics = nubBy (\d1 d2 -> let FileWith path1 range1 = d1.range; FileWith path2 range2 = d2.range in path1 == path2 && range1 == range2 && d1.message == d2.message) relevantDiagnostics
   putStrLn $ "After deduplication: " ++ show (length deduplicatedDiagnostics) ++ " unique not-exported diagnostics"
-  
+
   -- Process each diagnostic and collect edits in a Map
   editsMap <- foldM collectNotExportedEdit Map.empty deduplicatedDiagnostics
   -- Debug: show what edits are being collected
@@ -210,7 +209,7 @@ parseImportedFromAtIndex idx message =
   let lines = T.lines message
       importedLines = filter (T.isInfixOf "imported from") lines
    in case drop idx importedLines of
-        (line:_) ->
+        (line : _) ->
           let afterAtWithPrefix = snd (T.breakOn " at " line)
            in if T.isPrefixOf " at " afterAtWithPrefix
                 then
@@ -265,17 +264,17 @@ hideSymbolInImport wimp sym =
   let item = mkValueImportItem sym
    in case (wimp.hiding, wimp.importList) of
         (True, Nothing) ->
-          Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = () }
+          Hir.Import {mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = ()}
         (True, Just items) ->
           let exists i = i.name.nameText == sym
               items' = if any exists items then items else items ++ [item]
-           in Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just items', dynNode = () }
+           in Hir.Import {mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just items', dynNode = ()}
         (False, Nothing) ->
-          Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = () }
+          Hir.Import {mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = True, importList = Just [item], dynNode = ()}
         (False, Just items) ->
           let keep i = i.name.nameText /= sym
               items' = filter keep items
-           in Hir.Import { mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = False, importList = Just items', dynNode = () }
+           in Hir.Import {mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = False, importList = Just items', dynNode = ()}
 
 -- | Construct a rewrite edit that hides the ambiguous symbol on the selected import (by index)
 mkAmbiguousImportHidingEdit :: Int -> Diagnostic -> IO (Maybe (FilePath, Range, Edit))
@@ -290,9 +289,9 @@ mkAmbiguousImportHidingEdit whichIdx diagnostic = do
           (_, program) = parsePrg fileContent
           imports = program.imports
           contains r1 r2 = r1.start.pos <= r2.start.pos && r1.end.pos >= r2.end.pos
-          matched = [ imp | imp <- imports, contains imp.dynNode.nodeRange targetRange ]
+          matched = [imp | imp <- imports, contains imp.dynNode.nodeRange targetRange]
       case matched of
-        (imp:_) -> do
+        (imp : _) -> do
           let wimp = Render.fromReadImport imp
               updated = hideSymbolInImport wimp sym
               newText = Render.renderImport updated
@@ -398,13 +397,13 @@ toNewImport orig newMod _reexportIdentifiers =
   let alias = orig.alias
       qualified = orig.qualified
    in [ Hir.Import
-        { mod = newMod
-        , qualified
-        , alias = if isJust alias then alias else Just orig.mod
-        , hiding = orig.hiding
-        , importList = orig.importList
-        , dynNode = ()
-        }
+          { mod = newMod
+          , qualified
+          , alias = if isJust alias then alias else Just orig.mod
+          , hiding = orig.hiding
+          , importList = orig.importList
+          , dynNode = ()
+          }
       ]
 
 replaceImport :: Hir.Read.Import -> [Hir.ModuleText] -> Set.Set Text.Text -> Edit
@@ -459,19 +458,19 @@ mkNotExportedDeletionInfo diagnostic = do
   -- Debug: print the diagnostic range
   putStrLn $ "Processing not-exported diagnostic: " ++ show range ++ " in " ++ absFilePath
   putStrLn $ "Diagnostic message: " ++ T.unpack diagnostic.message
-  
+
   -- Read the file content to calculate proper character positions
   fileContent <- TextIO.readFile absFilePath
   let rope = Rope.fromText fileContent
   -- Convert LineColRange to Range for Edit operations
   let editRange = Rope.lineColRangeToRange rope range
   putStrLn $ "Converted to Range: " ++ show editRange
-  
+
   -- Debug: show the exact content being deleted
   let deletedContent = Rope.indexRange rope editRange
       deletedText = maybe "" Rope.toText deletedContent
   putStrLn $ "Content to be deleted: '" ++ T.unpack deletedText ++ "'"
-  
+
   -- Check if there's a comma after the range
   let endPos = editRange.end
       -- Look for a comma in the next few characters after the range
@@ -479,15 +478,14 @@ mkNotExportedDeletionInfo diagnostic = do
       afterContent = Rope.indexRange rope searchRange
       afterText = maybe "" Rope.toText afterContent
   putStrLn $ "Content after range: '" ++ T.unpack afterText ++ "'"
-  
+
   -- Check if there's a comma immediately after the item
   let finalRange =
         case T.uncons afterText of
           Just (',', _) ->
             -- Include the comma in the deletion
             Range editRange.start (endPos {pos = endPos.pos + 1})
-          _ -> editRange  -- Just delete the range as-is
-  
+          _ -> editRange -- Just delete the range as-is
   putStrLn $ "Final deletion range: " ++ show finalRange
   let deletionEdit = Edit.delete finalRange
   putStrLn $ "Created deletion edit for " ++ absFilePath

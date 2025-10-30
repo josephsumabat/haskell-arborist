@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeAbstractions #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Arborist.Renamer (
   renamePrg,
@@ -273,7 +273,7 @@ renamePrg availPrgs exportIdx prg =
           (x : xs) -> AmbiguousGlobalVar (x NE.:| xs)
 
   getValidGlobalVarInfos :: RenamerEnv -> Scope -> T.Text -> Maybe AST.ModuleP -> [GlblVarInfo]
-  getValidGlobalVarInfos renamerEnv currScope varName qualifier = 
+  getValidGlobalVarInfos renamerEnv currScope varName qualifier =
     case Map.lookup varName currScope.glblVarInfo of
       Nothing -> []
       Just impVarMap ->

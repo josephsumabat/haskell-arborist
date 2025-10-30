@@ -11,27 +11,27 @@ module Arborist.Rewrite (
 
 import AST (DynNode)
 import AST qualified
+import Arborist.Rewrite.Apply qualified as Apply
+import Arborist.Rewrite.Core (adjustEdit, applyEdit, applyMultipleEdits)
+import Control.Exception qualified as E
 import Data.Change (Change (..))
 import Data.Edit
 import Data.Edit qualified as Edit
+import Data.HashMap.Strict qualified as HashMap
 import Data.LineCol
 import Data.LineColRange
 import Data.List (foldl')
 import Data.Ord qualified as Ord
+import Data.Path qualified as Path
 import Data.Pos
 import Data.Range as Range (Range (..))
+import Data.SourceEdit (FsEdit (..), SourceEdit (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Data.HashMap.Strict qualified as HashMap
-import Data.SourceEdit (SourceEdit(..), FsEdit(..))
-import Data.Path qualified as Path
-import System.FilePath qualified as FilePath
 import System.Directory qualified as Dir
-import Control.Exception qualified as E
+import System.FilePath qualified as FilePath
 import System.IO qualified as IO
-import Arborist.Rewrite.Apply qualified as Apply
-import Arborist.Rewrite.Core (applyEdit, applyMultipleEdits, adjustEdit)
 
 replaceRange :: LineColRange -> Text -> Text -> Text
 replaceRange (LineColRange (LineCol startLine startCol) (LineCol endLine endCol)) replacement original =
@@ -65,10 +65,10 @@ rewriteNode dynNode newText =
 
 -- | Apply a SourceEdit: write file edits and perform filesystem edits (moves)
 applySourceEdit :: SourceEdit -> IO ()
-applySourceEdit SourceEdit{fileEdits, fsEdits} = do
+applySourceEdit SourceEdit {fileEdits, fsEdits} = do
   -- Apply per-file edits
   mapM_
-    (\(absPath, edit) -> do
+    ( \(absPath, edit) -> do
         let fp = Path.toFilePath absPath
         res <- E.try (Apply.writeEdit fp edit) :: IO (Either E.SomeException ())
         case res of
@@ -80,7 +80,7 @@ applySourceEdit SourceEdit{fileEdits, fsEdits} = do
   mapM_ applyFsEdit fsEdits
  where
   applyFsEdit :: FsEdit -> IO ()
-  applyFsEdit (FsEditMoveFile{src, dst}) = do
+  applyFsEdit (FsEditMoveFile {src, dst}) = do
     let srcFp = Path.toFilePath src
         dstFp = Path.toFilePath dst
         dstDir = FilePath.takeDirectory dstFp
