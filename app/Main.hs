@@ -36,7 +36,8 @@ data Command
   | GroupCandidates GroupCandidatesOptions
 
 data DumpTargetGraphOptions = DumpTargetGraphOptions
-  { rootDir :: FilePath
+  { srcRootDir :: FilePath
+  , rootBuckDir :: FilePath
   , srcDirs :: [FilePath]
   , recursiveTargetDirs :: [FilePath]
   , overrideMapPath :: Maybe FilePath
@@ -129,9 +130,14 @@ commandParser =
     dumpTargetGraphOptionsParser =
       DumpTargetGraphOptions
         <$> Opt.strOption
-          ( Opt.long "root"
+          ( Opt.long "src-root"
               <> Opt.metavar "DIR"
               <> Opt.help "Root directory containing the listed source directories"
+          )
+        <*> Opt.strOption
+          ( Opt.long "root"
+              <> Opt.metavar "DIR"
+              <> Opt.help "Directory containing the root-level BUCK file"
           )
         <*> Opt.many
           ( Opt.strArgument
@@ -184,8 +190,8 @@ commandParser =
           )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
-runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs, overrideMapPath} = do
-  let effectiveSrcDirs = if null srcDirs then [rootDir] else srcDirs
+runDumpTargetGraph DumpTargetGraphOptions {srcRootDir, rootBuckDir, srcDirs, recursiveTargetDirs, overrideMapPath} = do
+  let effectiveSrcDirs = if null srcDirs then [srcRootDir] else srcDirs
   overrides <-
     case overrideMapPath of
       Nothing -> pure Nothing
@@ -194,7 +200,7 @@ runDumpTargetGraph DumpTargetGraphOptions {rootDir, srcDirs, recursiveTargetDirs
         case Aeson.eitherDecode bytes of
           Left err -> die ("Failed to parse module target overrides from " <> path <> ": " <> err)
           Right parsed -> pure (Just parsed)
-  result <- buildGraphFromDirectoriesWithRecursiveTargets rootDir effectiveSrcDirs recursiveTargetDirs overrides
+  result <- buildGraphFromDirectoriesWithRecursiveTargets srcRootDir rootBuckDir effectiveSrcDirs recursiveTargetDirs overrides
   case result of
     Left err -> die (renderBuildGraphError err)
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))
