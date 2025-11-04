@@ -17,10 +17,13 @@ import Data.Maybe (mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Diagnostics.Fixes (runAllFixes)
+import Data.List.NonEmpty qualified as NE
 import Options.Applicative (Parser, ParserInfo)
 import Options.Applicative qualified as Opt
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
 import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
+import Scripts.ModuleFiles (ModuleFilesOptions (..), runModuleFiles)
+import Scripts.RequiredTargetFiles (RequiredTargetFilesOptions (..), runRequiredTargetFiles)
 import System.Exit (die)
 
 data Command
@@ -34,6 +37,8 @@ data Command
   | DumpRenamedAst DumpRenamedAstOptions
   | DumpTargetGraph DumpTargetGraphOptions
   | GroupCandidates GroupCandidatesOptions
+  | ModuleFiles ModuleFilesOptions
+  | RequiredTargetFiles RequiredTargetFilesOptions
 
 data DumpTargetGraphOptions = DumpTargetGraphOptions
   { srcRootDir :: FilePath
@@ -65,6 +70,8 @@ runCommand cmd = case cmd of
   DumpRenamedAst opts -> runDumpRenamedAst opts
   DumpTargetGraph opts -> runDumpTargetGraph opts
   GroupCandidates opts -> runGroupCandidates opts
+  ModuleFiles opts -> runModuleFiles opts
+  RequiredTargetFiles opts -> runRequiredTargetFiles opts
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -95,6 +102,14 @@ commandParser =
         ( Opt.info (GroupCandidates <$> groupCandidatesOptionsParser)
             (Opt.progDesc "Merge eligible module targets in an existing BuildGraphOutput")
         )
+      <> Opt.command "module-files"
+        ( Opt.info (ModuleFiles <$> moduleFilesOptionsParser)
+            (Opt.progDesc "Resolve modules to source files and emit a JSON object mapping them")
+        )
+      <> Opt.command "required-target-files"
+        ( Opt.info (RequiredTargetFiles <$> requiredTargetFilesOptionsParser)
+            (Opt.progDesc "List unique source files directly imported by the provided modules")
+        )
       <> Opt.metavar "COMMAND"
   where
     command name cmd desc =
@@ -118,12 +133,10 @@ commandParser =
                   <> Opt.help "Destination file for the renamed AST dump (defaults to stdout)"
               )
           )
-        <*> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "config"
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "Override path to the Arborist configuration file"
-              )
+        <*> Opt.strOption
+          ( Opt.long "config"
+              <> Opt.metavar "FILE"
+              <> Opt.help "Path to the Arborist configuration JSON"
           )
 
     dumpTargetGraphOptionsParser :: Parser DumpTargetGraphOptions
@@ -159,6 +172,44 @@ commandParser =
                   <> Opt.help "JSON file containing module target overrides"
               )
           )
+
+    moduleFilesOptionsParser :: Parser ModuleFilesOptions
+    moduleFilesOptionsParser =
+      ModuleFilesOptions
+        <$> Opt.optional
+          ( Opt.strOption
+              ( Opt.long "config"
+                  <> Opt.metavar "FILE"
+                  <> Opt.help "Optional path to the Arborist JSON configuration"
+              )
+          )
+        <*> ( NE.fromList . map T.pack
+                <$> Opt.some
+                  ( Opt.strArgument
+                      ( Opt.metavar "MODULE..."
+                          <> Opt.help "One or more module names to resolve"
+                      )
+                  )
+            )
+
+    requiredTargetFilesOptionsParser :: Parser RequiredTargetFilesOptions
+    requiredTargetFilesOptionsParser =
+      RequiredTargetFilesOptions
+        <$> Opt.optional
+          ( Opt.strOption
+              ( Opt.long "config"
+                  <> Opt.metavar "FILE"
+                  <> Opt.help "Optional path to the Arborist JSON configuration"
+              )
+          )
+        <*> ( NE.fromList . map T.pack
+                <$> Opt.some
+                  ( Opt.strArgument
+                      ( Opt.metavar "MODULE..."
+                          <> Opt.help "One or more module names to analyze"
+                      )
+                  )
+            )
 
     groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
     groupCandidatesOptionsParser =

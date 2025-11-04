@@ -84,6 +84,8 @@ library
       ModUtils
       Scripts.DirCycles
       Scripts.DumpRenamedAst
+      Scripts.ModuleFiles
+      Scripts.RequiredTargetFiles
   other-modules:
       BuildGraph.Directory.TH
       BuildGraph.ModuleTargetOverrides
@@ -154,8 +156,6 @@ library
 
 executable haskell-arborist
   main-is: Main.hs
-  other-modules:
-      Paths_haskell_arborist
   hs-source-dirs:
       app
   default-extensions:

@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Arborist.Config (
   ArboristConfig (..),
   loadArboristConfig,
@@ -6,30 +8,23 @@ module Arborist.Config (
 ) where
 
 import Control.Monad (unless)
-import Data.Aeson (FromJSON (..), (.:))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.TH (deriveJSON)
 import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
 import GHC.Stack (withFrozenCallStack)
 import System.Directory qualified as Dir
 
 data ArboristConfig = ArboristConfig
-  { mutableSourceRoots :: [FilePath]
-  , immutableSourceRoots :: [FilePath]
+  { srcDirs :: [FilePath]
+  , immutableSrcDirs :: [FilePath]
   }
   deriving (Show, Eq)
 
+$(deriveJSON Aeson.defaultOptions ''ArboristConfig)
+
 defaultConfigPath :: FilePath
 defaultConfigPath = "arborist-config.json"
-
-instance FromJSON ArboristConfig where
-  parseJSON = Aeson.withObject "ArboristConfig" $ \obj -> do
-    mutableRoots <- obj .: "mutableSourceRoots"
-    immutableRoots <- obj .: "immutableSourceRoots"
-    pure $ ArboristConfig (sanitize mutableRoots) (sanitize immutableRoots)
-   where
-    sanitize :: [FilePath] -> [FilePath]
-    sanitize = filter (not . null)
 
 loadArboristConfig :: Maybe FilePath -> IO ArboristConfig
 loadArboristConfig mPath = withFrozenCallStack $ do
@@ -40,11 +35,19 @@ loadArboristConfig mPath = withFrozenCallStack $ do
   raw <- BS.readFile configPath
   case Aeson.eitherDecodeStrict raw of
     Left err -> fail $ "Unable to parse Arborist configuration: " <> err
-    Right cfg ->
-      if null (allSourceRoots cfg)
-        then fail "Arborist configuration must specify at least one visible source root"
-        else pure cfg
+    Right rawCfg ->
+      let cfg = sanitizeConfig rawCfg
+       in if null (allSourceRoots cfg)
+            then fail "Arborist configuration must specify at least one visible source root"
+            else pure cfg
 
 allSourceRoots :: ArboristConfig -> [FilePath]
-allSourceRoots ArboristConfig {mutableSourceRoots, immutableSourceRoots} =
-  mutableSourceRoots ++ immutableSourceRoots
+allSourceRoots ArboristConfig {srcDirs, immutableSrcDirs} =
+  srcDirs ++ immutableSrcDirs
+
+sanitizeConfig :: ArboristConfig -> ArboristConfig
+sanitizeConfig ArboristConfig {srcDirs, immutableSrcDirs} =
+  ArboristConfig
+    { srcDirs = filter (not . null) srcDirs
+    , immutableSrcDirs = filter (not . null) immutableSrcDirs
+    }

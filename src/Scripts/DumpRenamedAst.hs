@@ -23,13 +23,13 @@ import System.FilePath (takeDirectory)
 data DumpRenamedAstOptions = DumpRenamedAstOptions
   { sourceFile :: FilePath
   , outputFile :: Maybe FilePath
-  , configFile :: Maybe FilePath
+  , configFile :: FilePath
   }
 
 runDumpRenamedAst :: DumpRenamedAstOptions -> IO ()
 runDumpRenamedAst DumpRenamedAstOptions {sourceFile, outputFile, configFile} = do
-  ArboristConfig {mutableSourceRoots, immutableSourceRoots} <- loadArboristConfig configFile
-  let sourceRoots = mutableSourceRoots ++ immutableSourceRoots
+  ArboristConfig {srcDirs, immutableSrcDirs} <- loadArboristConfig (Just configFile)
+  let sourceRoots = srcDirs ++ immutableSrcDirs
   modFileMap <- buildModuleFileMap sourceRoots
 
   sourceAbs <- Dir.makeAbsolute sourceFile
