@@ -414,17 +414,29 @@ initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap re
   moduleTargetAssignment :: HashMap Hir.ModuleText TargetOverride -> ModuleInfo -> Maybe (TargetKey, DirName)
   moduleTargetAssignment overridesMap info
     | HM.member info.name overridesMap = Nothing
-    | otherwise =
-        case info.location of
-          LocalModule moduleDir
-            | Just buckDir <- nearestBuckDir moduleDir -> Just (DirectoryTarget buckDir, buckDir)
-            | moduleIsRootControlled moduleDir -> Just (DirectoryTarget rootTargetDir, rootTargetDir)
-            | shouldStickWithChildDir moduleDir -> Just (DirectoryTarget moduleDir, moduleDir)
-            | otherwise ->
-                case findRecursiveTargetDir recursiveTargetDirs moduleDir of
-                  Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
-                  Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
-          ExternalModule -> Nothing
+    | hasOverrideMap = assignWithOverrides info
+    | otherwise = assignWithoutOverrides info
+
+  assignWithOverrides :: ModuleInfo -> Maybe (TargetKey, DirName)
+  assignWithOverrides info =
+    case info.location of
+      LocalModule moduleDir ->
+        let targetDir = fromMaybe rootTargetDir (nearestBuckDir moduleDir)
+         in Just (DirectoryTarget targetDir, targetDir)
+      ExternalModule -> Nothing
+
+  assignWithoutOverrides :: ModuleInfo -> Maybe (TargetKey, DirName)
+  assignWithoutOverrides info =
+    case info.location of
+      LocalModule moduleDir
+        | Just buckDir <- nearestBuckDir moduleDir -> Just (DirectoryTarget buckDir, buckDir)
+        | moduleIsRootControlled moduleDir -> Just (DirectoryTarget rootTargetDir, rootTargetDir)
+        | shouldStickWithChildDir moduleDir -> Just (DirectoryTarget moduleDir, moduleDir)
+        | otherwise ->
+            case findRecursiveTargetDir recursiveTargetDirs moduleDir of
+              Just recursiveDir -> Just (RecursiveDirectoryTarget recursiveDir, recursiveDir)
+              Nothing -> Just (DirectoryTarget moduleDir, moduleDir)
+      ExternalModule -> Nothing
 
   mergeTargets :: TargetState -> TargetState -> TargetState
   mergeTargets left right =

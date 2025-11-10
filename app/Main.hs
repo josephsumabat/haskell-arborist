@@ -11,9 +11,10 @@ import BuildGraph.Directory
   , renderBuildGraphError
   )
 import BuildGraph.GroupCandidates (groupOutputCandidates)
+import Control.Monad (when)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as BL8
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Diagnostics.Fixes (runAllFixes)
@@ -251,6 +252,9 @@ runDumpTargetGraph DumpTargetGraphOptions {srcRootDir, rootBuckDir, srcDirs, rec
         case Aeson.eitherDecode bytes of
           Left err -> die ("Failed to parse module target overrides from " <> path <> ": " <> err)
           Right parsed -> pure (Just parsed)
+  when (isJust overrides && not (null recursiveTargetDirs)) $
+    die "Recursive target directories cannot be provided when module target overrides are in use"
+
   result <- buildGraphFromDirectoriesWithRecursiveTargets srcRootDir rootBuckDir effectiveSrcDirs recursiveTargetDirs overrides
   case result of
     Left err -> die (renderBuildGraphError err)
