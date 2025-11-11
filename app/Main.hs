@@ -52,6 +52,7 @@ data DumpTargetGraphOptions = DumpTargetGraphOptions
 data GroupCandidatesOptions = GroupCandidatesOptions
   { candidatesInput :: Maybe FilePath
   , candidatesDirectories :: [DirName]
+  , candidatesModulePrefixes :: [T.Text]
   , groupRecursive :: Bool
   , groupAll :: Bool
   }
@@ -232,6 +233,15 @@ commandParser =
                     <> Opt.help "Directory target to restrict merging (may be provided multiple times)"
                 )
           )
+        <*> Opt.many
+          ( T.pack
+              <$> Opt.strOption
+                ( Opt.long "module-prefix"
+                    <> Opt.short 'm'
+                    <> Opt.metavar "MODULE"
+                    <> Opt.help "Module prefix to merge across matching directory targets (may be provided multiple times)"
+                )
+          )
         <*> Opt.switch
           ( Opt.long "group-recursive"
               <> Opt.help "Automatically group directories that were emitted as recursive targets"
@@ -261,7 +271,7 @@ runDumpTargetGraph DumpTargetGraphOptions {srcRootDir, rootBuckDir, srcDirs, rec
     Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))
 
 runGroupCandidates :: GroupCandidatesOptions -> IO ()
-runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories, groupRecursive, groupAll} = do
+runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories, candidatesModulePrefixes, groupRecursive, groupAll} = do
   bytes <-
     case candidatesInput of
       Nothing -> BL8.getContents
@@ -279,7 +289,7 @@ runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectorie
               else []
           requestedDirs =
             Set.toList $ Set.fromList (candidatesDirectories <> recursiveDirs <> allDirs)
-       in BL8.putStrLn (Aeson.encode (groupOutputCandidates graph requestedDirs))
+       in BL8.putStrLn (Aeson.encode (groupOutputCandidates graph requestedDirs candidatesModulePrefixes))
      where
       graphTargets = case graph of
         BuildGraphOutput {targets = ts} -> ts

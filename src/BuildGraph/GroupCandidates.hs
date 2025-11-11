@@ -20,6 +20,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Maybe (mapMaybe)
 import Debug.Trace (trace)
 
 newtype TargetNodeId = TargetNodeId Text
@@ -27,6 +28,10 @@ newtype TargetNodeId = TargetNodeId Text
 
 targetNodeIdText :: TargetNodeId -> Text
 targetNodeIdText (TargetNodeId txt) = txt
+
+data MergeStrategy
+  = MergeEntireDirectory
+  | MergeByModulePrefixes [Text]
 
 data OutputGraphState = OutputGraphState
   { ogTargets :: !(HashMap TargetNodeId OutputTargetState)
@@ -43,10 +48,14 @@ data OutputTargetState = OutputTargetState
   , otDependsOn :: !(Set Text)
   }
 
-groupOutputCandidates :: BuildGraphOutput -> [DirName] -> BuildGraphOutput
-groupOutputCandidates output requestedDirs =
+groupOutputCandidates :: BuildGraphOutput -> [DirName] -> [Text] -> BuildGraphOutput
+groupOutputCandidates output requestedDirs modulePrefixes =
   stateToOutput finalState
  where
+  mergeStrategy =
+    case dedupePreservingOrder modulePrefixes of
+      [] -> MergeEntireDirectory
+      prefixes -> MergeByModulePrefixes prefixes
   requestedSet =
     case requestedDirs of
       [] -> Nothing
@@ -56,21 +65,93 @@ groupOutputCandidates output requestedDirs =
   targetDirs =
     maybe availableDirs (`Set.intersection` availableDirs) requestedSet
   finalState =
-    foldl' mergeDir initialState (List.sort (Set.toList targetDirs))
+    foldl' (mergeDir mergeStrategy) initialState (List.sort (Set.toList targetDirs))
 
   dirNameText (DirName txt) = txt
 
-mergeDir :: OutputGraphState -> Text -> OutputGraphState
-mergeDir state dir =
-  finalState
+dedupePreservingOrder :: (Ord a) => [a] -> [a]
+dedupePreservingOrder = go Set.empty
  where
-  moduleIds =
-    List.sort
-      [ target.otKeyId
+  go _ [] = []
+  go seen (x : xs)
+    | Set.member x seen = go seen xs
+    | otherwise = x : go (Set.insert x seen) xs
+
+mergeDir :: MergeStrategy -> OutputGraphState -> Text -> OutputGraphState
+mergeDir strategy state dir =
+  case strategy of
+    MergeEntireDirectory -> mergeTargetsInDir state dir (const True)
+    MergeByModulePrefixes prefixes ->
+      let exploded = explodeDirectoryModules state dir
+       in foldl'
+            (\st prefix -> mergeTargetsInDir st dir (targetMatchesPrefix prefix))
+            exploded
+            prefixes
+
+explodeDirectoryModules :: OutputGraphState -> Text -> OutputGraphState
+explodeDirectoryModules state dir
+  | null targetsToSplit = state
+  | otherwise =
+      recomputeAllDependencies
+        state
+          { ogTargets = targetsWithSplits
+          , ogModuleToTarget = moduleAssignments'
+          }
+ where
+  targetsToSplit =
+    [ (targetId, target)
+    | (targetId, target) <- HM.toList state.ogTargets
+    , target.otDirectory == dir
+    , targetHasModules target
+    ]
+
+  targetsWithoutOriginal = foldl' (flip HM.delete) state.ogTargets (map fst targetsToSplit)
+
+  (moduleAssignments', targetsWithSplits) =
+    foldl'
+      insertSplitTarget
+      (state.ogModuleToTarget, targetsWithoutOriginal)
+      targetsToSplit
+
+  insertSplitTarget (moduleAcc, targetAcc) (_, target) =
+    foldl'
+      (\(mAcc, tAcc) moduleName ->
+          let newKey = ModuleTargetOutput moduleName
+              newId = targetKeyId newKey
+              newTarget =
+                OutputTargetState
+                  { otKey = newKey
+                  , otKeyId = newId
+                  , otDirectory = target.otDirectory
+                  , otModules = Set.singleton moduleName
+                  , otDependsOn = target.otDependsOn
+                  }
+           in ( HM.insert moduleName newKey mAcc
+              , HM.insert newId newTarget tAcc
+              )
+      )
+      (moduleAcc, targetAcc)
+      (Set.toList target.otModules)
+
+mergeTargetsInDir :: OutputGraphState -> Text -> (OutputTargetState -> Bool) -> OutputGraphState
+mergeTargetsInDir state dir predicate =
+  mergeModuleIds state dir orderedIds
+ where
+  moduleTargets =
+    List.sortOn (.otKeyId)
+      [ target
       | target <- HM.elems state.ogTargets
       , target.otDirectory == dir
       , isModuleKey target.otKey
+      , predicate target
       ]
+  canonicalId = canonicalTargetId state moduleTargets
+  moduleIds = map (.otKeyId) moduleTargets
+  orderedIds = reorderCanonical canonicalId moduleIds
+
+mergeModuleIds :: OutputGraphState -> Text -> [TargetNodeId] -> OutputGraphState
+mergeModuleIds state dir moduleIds = finalState
+ where
   moduleCount = length moduleIds
   totalAttempts =
     if moduleCount < 2 then 0 else moduleCount * (moduleCount - 1) `div` 2
@@ -98,13 +179,69 @@ mergeDir state dir =
         remaining = reverse remainingRev
      in go nextState remaining nextAttemptIndex
 
+targetMatchesPrefix :: Text -> OutputTargetState -> Bool
+targetMatchesPrefix prefix target =
+  not (Text.null prefix)
+    && not (Set.null target.otModules)
+    && all (moduleMatchesPrefix prefix) (Set.toList target.otModules)
+
+moduleMatchesPrefix :: Text -> Text -> Bool
+moduleMatchesPrefix prefix moduleName
+  | prefix == moduleName = True
+  | otherwise = Text.isPrefixOf (prefixWithDot prefix) moduleName
+ where
+  prefixWithDot txt =
+    if Text.null txt
+      then txt
+      else txt <> "."
+
+canonicalTargetId :: OutputGraphState -> [OutputTargetState] -> Maybe TargetNodeId
+canonicalTargetId state targets =
+  case pickLeaf sortedLeaves of
+    Just targetId -> Just targetId
+    Nothing -> pickLeaf sortedAll
+ where
+  targetInfos = mapMaybe targetPrimary targets
+  idSet = Set.fromList (map snd targetInfos)
+  leaves =
+    [ info
+    | info@(_, targetId) <- targetInfos
+    , let deps = HM.lookupDefault Set.empty targetId state.ogTargetDeps
+    , Set.null (Set.intersection idSet deps)
+    ]
+  sortedLeaves = List.sortOn fst leaves
+  sortedAll = List.sortOn fst targetInfos
+
+  pickLeaf [] = Nothing
+  pickLeaf ((_, tid) : _) = Just tid
+
+targetPrimary :: OutputTargetState -> Maybe (Text, TargetNodeId)
+targetPrimary target = do
+  moduleName <- targetPrimaryModule target
+  pure (moduleName, target.otKeyId)
+
+targetPrimaryModule :: OutputTargetState -> Maybe Text
+targetPrimaryModule target =
+  case List.sort (Set.toList target.otModules) of
+    [] -> Nothing
+    (m : _) -> Just m
+
+reorderCanonical :: Maybe TargetNodeId -> [TargetNodeId] -> [TargetNodeId]
+reorderCanonical Nothing ids = ids
+reorderCanonical (Just canonical) ids = matches ++ rest
+ where
+  (matches, rest) = List.partition (== canonical) ids
+
 collectGroupableDirectories :: OutputGraphState -> Set Text
 collectGroupableDirectories state =
   Set.fromList
     [ target.otDirectory
     | target <- HM.elems state.ogTargets
-    , isModuleKey target.otKey
+    , targetHasModules target
     ]
+
+targetHasModules :: OutputTargetState -> Bool
+targetHasModules target = not (Set.null target.otModules)
 
 mergeModuleTargets :: OutputGraphState -> Text -> TargetNodeId -> TargetNodeId -> Maybe OutputGraphState
 mergeModuleTargets state dir destId sourceId = do
@@ -360,3 +497,12 @@ invertDependencies deps =
     )
     HM.empty
     deps
+
+recomputeAllDependencies :: OutputGraphState -> OutputGraphState
+recomputeAllDependencies state =
+  state
+    { ogTargetDeps = deps
+    , ogReverseTargetDeps = invertDependencies deps
+    }
+ where
+  deps = computeTargetDependencies state.ogTargets state.ogModuleToTarget
