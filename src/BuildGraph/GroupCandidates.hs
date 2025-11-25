@@ -44,6 +44,7 @@ data OutputTargetState = OutputTargetState
   { otKey :: !TargetKeyOutput
   , otKeyId :: !TargetNodeId
   , otTargetName :: !Text
+  , otTargetKey :: !Text
   , otDirectory :: !Text
   , otModules :: !(Set Text)
   , otDependsOn :: !(Set Text)
@@ -119,17 +120,18 @@ explodeDirectoryModules state dir
       (\(mAcc, tAcc) moduleName ->
           let newKey = ModuleTargetOutput moduleName
               newId = targetKeyId newKey
-              newTargetName = renderOutputTargetName target.otDirectory moduleName
+              (newTargetName, newFullName) = renderOutputTargetNames target.otDirectory moduleName
               newTarget =
                 OutputTargetState
                   { otKey = newKey
                   , otKeyId = newId
                   , otTargetName = newTargetName
+                  , otTargetKey = newFullName
                   , otDirectory = target.otDirectory
                   , otModules = Set.singleton moduleName
                   , otDependsOn = target.otDependsOn
                   }
-           in ( HM.insert moduleName newTargetName mAcc
+           in ( HM.insert moduleName newFullName mAcc
               , HM.insert newId newTarget tAcc
               )
       )
@@ -262,17 +264,30 @@ mergeModuleTargets state dir destId sourceId = do
               , otDependsOn = filteredDeps
               }
           updatedTarget =
-            targetBase
-              { otTargetName =
-                  maybe destTarget.otTargetName (renderOutputTargetName destTarget.otDirectory) (targetPrimaryModule targetBase)
-              }
+            case targetPrimaryModule targetBase of
+              Nothing -> targetBase
+              Just moduleName ->
+                let (shortName, fullName) = renderOutputTargetNames destTarget.otDirectory moduleName
+                 in targetBase
+                      { otTargetName = shortName
+                      , otTargetKey = fullName
+                      }
           targets' =
             HM.insert destId updatedTarget (HM.delete sourceId state.ogTargets)
+          -- Keep moduleToTarget consistent with whatever key ends up representing
+          -- the merged target. When the destination target changes keys (because
+          -- the canonical module changes), we have to remap its existing modules
+          -- as well, otherwise later dependency analysis will still think they
+          -- point at the old target.
+          modulesNeedingUpdate =
+            if destTarget.otTargetKey == updatedTarget.otTargetKey
+              then sourceTarget.otModules
+              else mergedModules
           moduleToTarget' =
             foldl'
-              (\acc moduleName -> HM.insert moduleName updatedTarget.otTargetName acc)
+              (\acc moduleName -> HM.insert moduleName updatedTarget.otTargetKey acc)
               state.ogModuleToTarget
-              (Set.toList sourceTarget.otModules)
+              (Set.toList modulesNeedingUpdate)
           affectedTargets =
             Set.toList
               ( Set.insert
@@ -322,11 +337,12 @@ outputToState BuildGraphOutput {targets, moduleToTarget} =
   reverseDeps = invertDependencies targetDeps
 
 toState :: TargetOutput -> OutputTargetState
-toState TargetOutput {key, targetName, directory, modules, dependsOn} =
+toState TargetOutput {key, targetName, targetKey, directory, modules, dependsOn} =
   OutputTargetState
     { otKey = key
     , otKeyId = targetKeyId key
     , otTargetName = targetName
+    , otTargetKey = targetKey
     , otDirectory = directory
     , otModules = Set.fromList modules
     , otDependsOn = Set.fromList dependsOn
@@ -343,10 +359,11 @@ stateToOutput OutputGraphState {ogTargets, ogModuleToTarget} =
     }
 
 toOutput :: OutputTargetState -> TargetOutput
-toOutput OutputTargetState {otKey, otTargetName, otDirectory, otModules, otDependsOn} =
+toOutput OutputTargetState {otKey, otTargetName, otTargetKey, otDirectory, otModules, otDependsOn} =
   TargetOutput
     { key = otKey
     , targetName = otTargetName
+    , targetKey = otTargetKey
     , directory = otDirectory
     , modules = List.sort (Set.toList otModules)
     , dependsOn = List.sort (Set.toList otDependsOn)
@@ -392,9 +409,15 @@ formatMergeResult dir destId sourceId succeeded attempt total =
   percentage _ tot | tot <= 0 = 100
   percentage att tot = (att * 100) `div` tot
 
-renderOutputTargetName :: Text -> Text -> Text
-renderOutputTargetName dir moduleName =
-  "//" <> normalizeDirectory dir <> ":" <> moduleTargetSlug moduleName
+renderOutputTargetNames :: Text -> Text -> (Text, Text)
+renderOutputTargetNames dir moduleName =
+  let slug = moduleTargetSlug moduleName
+      normalizedDir = normalizeDirectory dir
+      fullName =
+        case normalizedDir of
+          "" -> "//:" <> slug
+          other -> "//" <> other <> ":" <> slug
+   in (slug, fullName)
 
 normalizeDirectory :: Text -> Text
 normalizeDirectory text =
@@ -522,7 +545,7 @@ targetDependencies moduleToTarget nameIndex target =
 targetNameIndex :: HashMap TargetNodeId OutputTargetState -> HashMap Text TargetNodeId
 targetNameIndex targets =
   HM.fromList
-    [ (targetState.otTargetName, targetId)
+    [ (targetState.otTargetKey, targetId)
     | (targetId, targetState) <- HM.toList targets
     ]
 

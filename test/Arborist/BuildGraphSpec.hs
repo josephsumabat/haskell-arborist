@@ -14,6 +14,7 @@ import BuildGraph.Directory (
 import BuildGraph.ModuleTargetOverrides (ModuleTargetOverrides (..))
 import Data.HashMap.Strict qualified as HM
 import Data.List qualified as List
+import Data.Maybe (listToMaybe)
 import Data.Set qualified as Set
 import Hir.Parse (parseModuleTextFromText)
 import Test.Hspec
@@ -57,9 +58,17 @@ spec = describe "moduleTargetsFromInfos" $ do
       lookupDirectory graph "NeedsRoot.Child" `shouldBe` Just "needs_root/child"
     it "renders module target names with directory prefixes" $ do
       lookupTargetName graph "NeedsRoot.Child" `shouldBe` Just "//needs_root/child:needsroot_child"
+    it "includes short and full target names on target outputs" $ do
+      lookupTargetFields graph "NeedsRoot.Child" `shouldBe` Just ("needsroot_child", "//needs_root/child:needsroot_child")
 
   where
     targetModules TargetOutput {modules = mods} = mods
     targetDirectory TargetOutput {directory = dirText} = dirText
     lookupTargetName BuildGraphOutput {moduleToTarget} moduleName =
       HM.lookup moduleName moduleToTarget
+    lookupTargetFields BuildGraphOutput {targets} moduleName =
+      listToMaybe
+        [ (target.targetName, target.targetKey)
+        | target <- targets
+        , moduleName `elem` targetModules target
+        ]

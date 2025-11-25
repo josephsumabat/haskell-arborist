@@ -128,6 +128,7 @@ data BuildGraphOutput = BuildGraphOutput
 data TargetOutput = TargetOutput
   { key :: TargetKeyOutput
   , targetName :: Text
+  , targetKey :: Text
   , directory :: Text
   , modules :: [Text]
   , dependsOn :: [Text]
@@ -970,13 +971,15 @@ moduleTargetsFromInfos rootInfo rootTargetDir buckDirs hasOverrideMap moduleInfo
   mkTarget :: (Hir.ModuleText, ModuleInfo, DirName) -> TargetOutput
   mkTarget (moduleName, info, dir) =
     let key = ModuleTargetOutput (moduleName.text)
+        slug = moduleTargetSlug (moduleTextToText moduleName)
      in TargetOutput
-      { key = key
-      , targetName = renderName rootInfo dir moduleName
-      , directory = dirNameToText dir
-      , modules = [moduleTextToText moduleName]
-      , dependsOn = map moduleTextToText (Set.toList (moduleDependencies info))
-      }
+          { key = key
+          , targetName = slug
+          , targetKey = renderName rootInfo dir moduleName
+          , directory = dirNameToText dir
+          , modules = [moduleTextToText moduleName]
+          , dependsOn = map moduleTextToText (Set.toList (moduleDependencies info))
+          }
 
   moduleDependencies :: ModuleInfo -> Set Hir.ModuleText
   moduleDependencies info = Set.delete info.name info.imports
@@ -1018,22 +1021,30 @@ graphToOutput graph =
   targetOutputs = map snd targetPairs
 
   targetNameMap :: HashMap TargetKey Text
-  targetNameMap = HM.fromList [(key, output.targetName) | (key, output) <- targetPairs]
+  targetNameMap = HM.fromList [(key, output.targetKey) | (key, output) <- targetPairs]
 
   targetToOutput :: Target -> TargetOutput
   targetToOutput target =
     let keyOut = keyOutput target.key
-        name =
+        (shortName, fullName) =
           case target.key of
-            ModuleTarget moduleName -> renderName rootInfo target.dir moduleName
-            _ -> targetNameFromKeyOutput keyOut
+            ModuleTarget moduleName -> moduleTargetNames moduleName target.dir
+            _ ->
+              let base = targetNameFromKeyOutput keyOut
+               in (base, base)
      in TargetOutput
           { key = keyOut
-          , targetName = name
+          , targetName = shortName
+          , targetKey = fullName
           , directory = dirNameToText target.dir
           , modules = map qualifiedModuleName (Set.toList target.modules)
           , dependsOn = map qualifiedModuleName (Set.toList target.dependsOn)
           }
+
+  moduleTargetNames :: Hir.ModuleText -> DirName -> (Text, Text)
+  moduleTargetNames moduleName dir =
+    let slug = moduleTargetSlug (moduleTextToText moduleName)
+     in (slug, renderName rootInfo dir moduleName)
 
   qualifiedModuleName :: Hir.ModuleText -> Text
   qualifiedModuleName moduleName = moduleName.text
