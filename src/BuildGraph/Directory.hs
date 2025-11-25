@@ -30,7 +30,7 @@ import Data.HashMap.Lazy qualified as Map
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
-import Data.List (find, foldl')
+import Data.List (find, foldl', sortOn)
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.List.NonEmpty qualified as NE
@@ -121,12 +121,13 @@ data MaxDirTargetGraph = MaxDirTargetGraph
 -- | Serializable representation of the target graph
 data BuildGraphOutput = BuildGraphOutput
   { targets :: [TargetOutput]
-  , moduleToTarget :: HashMap Text TargetKeyOutput
+  , moduleToTarget :: HashMap Text Text
   }
   deriving (Eq, Show, Generic)
 
 data TargetOutput = TargetOutput
   { key :: TargetKeyOutput
+  , targetName :: Text
   , directory :: Text
   , modules :: [Text]
   , dependsOn :: [Text]
@@ -149,6 +150,45 @@ $( deriveJSON
  )
 $(deriveJSON defaultOptions ''TargetOutput)
 $(deriveJSON defaultOptions ''BuildGraphOutput)
+
+dirNameToText :: DirName -> Text
+dirNameToText (DirName text) = text
+
+moduleTextToText :: Hir.ModuleText -> Text
+moduleTextToText = (.text)
+
+stripLeadingSlashes :: Text -> Text
+stripLeadingSlashes = T.dropWhile (== '/')
+
+trimTrailingSlash :: Text -> Text
+trimTrailingSlash txt
+  | T.null txt = txt
+  | otherwise = T.dropWhileEnd (== '/') txt
+
+targetNameFromKeyOutput :: TargetKeyOutput -> Text
+targetNameFromKeyOutput key =
+  case key of
+    DirectoryTargetOutput dir -> dir
+    RecursiveDirectoryTargetOutput dir -> dir
+    ModuleTargetOutput name -> name
+    ExternalTargetOutput name -> name
+
+renderName :: RootDirectory -> DirName -> Hir.ModuleText -> Text
+renderName rootInfo dir moduleName =
+  "//" <> renderDirectoryPath rootInfo dir <> ":" <> moduleTargetSlug (moduleTextToText moduleName)
+
+renderDirectoryPath :: RootDirectory -> DirName -> Text
+renderDirectoryPath _ dir = normalizeDirText (dirNameToText dir)
+
+moduleTargetSlug :: Text -> Text
+moduleTargetSlug = T.toLower . T.replace "." "_"
+
+normalizeDirText :: Text -> Text
+normalizeDirText text
+  | cleaned == "." = ""
+  | otherwise = stripLeadingSlashes cleaned
+ where
+  cleaned = trimTrailingSlash text
 
 -- Internal representations ----------------------------------------------------
 
@@ -217,6 +257,23 @@ buildGraphFromDirectoriesWithRecursiveTargets srcRoot rootBuckDir targetDirs rec
 
   pure (buildMaxDirTargetGraphWithRecursiveTargets rootInfo rootTargetDir buckDirs programIndex fullModFileMap recursiveDirSet overrides)
 
+buildModuleTargetGraph :: FilePath -> FilePath -> [FilePath] -> Maybe ModuleTargetOverrides -> IO BuildGraphOutput
+buildModuleTargetGraph srcRoot rootBuckDir targetDirs overrides = do
+  rootInfo <- normalizeRootDirectory srcRoot rootBuckDir
+  rootedDirs <- mapM (resolveSourceDir rootInfo) targetDirs
+  localModFileMap <- buildModuleFileMap rootedDirs
+  fullModFileMap <- buildModuleFileMap [rootInfo.rootPath]
+  buckDirs <- collectBuckDirectories rootInfo
+  rootTargetDir <- resolveRootTargetDir rootInfo rootBuckDir
+  programIndex <-
+    case targetDirs of
+      [] -> loadSimpleProgramIndex (Map.elems localModFileMap) fullModFileMap
+      _ -> loadAllPrograms [srcRoot]
+  let moduleInfos = buildModuleInfos rootInfo programIndex fullModFileMap
+      activeOverrides = fromMaybe emptyTargetOverrides overrides
+      hasOverrideMap = isJust overrides
+  pure (moduleTargetsFromInfos rootInfo rootTargetDir buckDirs hasOverrideMap moduleInfos activeOverrides)
+
 collectBuckDirectories :: RootDirectory -> IO (Set DirName)
 collectBuckDirectories rootInfo = go rootPath
  where
@@ -235,18 +292,12 @@ collectBuckDirectories rootInfo = go rootPath
         dirText =
           if relative == "." || T.null relText
             then "."
-            else applySourcePrefix relText
+            else applySourcePrefix rootInfo relText
         hereSet =
           if buckHere
             then Set.singleton (DirName dirText)
             else Set.empty
     pure (Set.unions (hereSet : childSets))
-
-  applySourcePrefix :: Text -> Text
-  applySourcePrefix rel =
-    case rootInfo.sourcePrefix of
-      Nothing -> rel
-      Just prefix -> ensureTrailingSlash prefix <> rel
 
   stripLeadingSlash :: Text -> Text
   stripLeadingSlash = T.dropWhile (== '/')
@@ -319,16 +370,43 @@ loadAllPrograms dirs = do
 
 -- Construction ----------------------------------------------------------------
 
+buildModuleInfos :: RootDirectory -> ProgramIndex -> ModFileMap -> HashMap Hir.ModuleText ModuleInfo
+buildModuleInfos rootInfo programIndex fullModFileMap =
+  HM.fromList
+    [ (moduleName, toInfo moduleName program)
+    | (moduleName, program) <- HM.toList programIndex
+    ]
+ where
+  toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
+  toInfo moduleName program =
+    case HM.lookup moduleName fullModFileMap of
+      Just filePath -> localInfo filePath
+      Nothing -> externalInfo
+   where
+    localInfo filePath =
+      ModuleInfo
+        { name = moduleName
+        , location = LocalModule (moduleDirectory rootInfo filePath)
+        , imports = moduleImports
+        }
+    externalInfo =
+      ModuleInfo
+        { name = moduleName
+        , location = ExternalModule
+        , imports = moduleImports
+        }
+
+    moduleImports =
+      let directImports = (.mod) <$> program.imports
+          globImports = globImportModules fullModFileMap moduleName program
+       in Set.fromList (directImports ++ globImports)
+
 initialBuildState :: RootDirectory -> DirName -> Set DirName -> ProgramIndex -> ModFileMap -> Set DirName -> Bool -> ModuleTargetOverrides -> BuildState
 initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap recursiveTargetDirs hasOverrideMap overrides =
   BuildState {moduleInfos, moduleToTarget, targets, rootInfo, preassignedTargets}
  where
   moduleInfos :: HashMap Hir.ModuleText ModuleInfo
-  moduleInfos =
-    HM.fromList
-      [ (moduleName, toInfo moduleName program)
-      | (moduleName, program) <- HM.toList programIndex
-      ]
+  moduleInfos = buildModuleInfos rootInfo programIndex fullModFileMap
 
   preassignedTargets :: HashMap Hir.ModuleText TargetOverride
   preassignedTargets =
@@ -365,31 +443,6 @@ initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap re
         )
       | (moduleName, targetKey, targetDir) <- assignments
       ]
-
-  toInfo :: Hir.ModuleText -> Hir.Read.Program -> ModuleInfo
-  toInfo moduleName program =
-    case HM.lookup moduleName fullModFileMap of
-      Just filePath ->
-        localInfo filePath
-      Nothing -> externalInfo
-   where
-    localInfo filePath =
-      ModuleInfo
-        { name = moduleName
-        , location = LocalModule (moduleDirectory rootInfo filePath)
-        , imports = moduleImports
-        }
-    externalInfo =
-      ModuleInfo
-        { name = moduleName
-        , location = ExternalModule
-        , imports = moduleImports
-        }
-
-    moduleImports =
-      let directImports = (.mod) <$> program.imports
-          globImports = globImportModules fullModFileMap moduleName program
-       in Set.fromList (directImports ++ globImports)
 
   ModuleTargetOverrides overrideRaw = overrides
 
@@ -478,7 +531,7 @@ initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap re
       then Nothing
       else
         let normalized = pathToText (T.unpack pathText)
-            prefixed = applySourcePrefix normalized
+            prefixed = applySourcePrefix rootInfo normalized
          in if T.null normalized then Nothing else Just (DirName prefixed)
 
   isRootOverride :: TargetOverride -> Bool
@@ -510,7 +563,7 @@ initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap re
   moduleNameDirectory moduleName =
     case NE.init (moduleName.parts) of
       [] -> Just (DirName rootInfo.rootLabel)
-      dirParts -> Just (DirName (applySourcePrefix (T.intercalate "/" dirParts)))
+      dirParts -> Just (DirName (applySourcePrefix rootInfo (T.intercalate "/" dirParts)))
 
   shouldStickWithChildDir :: DirName -> Bool
   shouldStickWithChildDir dir =
@@ -518,75 +571,28 @@ initialBuildState rootInfo rootTargetDir buckDirs programIndex fullModFileMap re
       && Set.member dir preservedDirTargets
       && not (Set.member dir recursiveTargetDirs)
 
-  applySourcePrefix :: Text -> Text
-  applySourcePrefix rel =
-    case rootInfo.sourcePrefix of
-      Nothing -> rel
-      Just prefix -> ensureTrailingSlash prefix <> rel
-
   normalizeDir :: DirName -> DirName
   normalizeDir (DirName text)
     | trimmed == "" = DirName "."
-    | otherwise = DirName (reapplyPrefix trimmed)
+    | otherwise = DirName (reapplyPrefix rootInfo trimmed)
    where
-    trimmed = stripSourcePrefix text
+    trimmed = stripSourcePrefix rootInfo text
 
   dirClosure :: DirName -> Set DirName
   dirClosure dir =
-    let rel = stripSourcePrefix (dirNameToText dir)
+    let rel = stripSourcePrefix rootInfo (dirNameToText dir)
         segments = filter (not . T.null) (T.splitOn "/" rel)
         dirs =
           case segments of
             [] -> [DirName "."]
             _ ->
-              [ DirName (reapplyPrefix (T.intercalate "/" (take k segments)))
+              [ DirName (reapplyPrefix rootInfo (T.intercalate "/" (take k segments)))
               | k <- [1 .. length segments]
               ]
      in Set.fromList dirs
 
-  stripSourcePrefix :: Text -> Text
-  stripSourcePrefix text
-    | text == "." = ""
-    | otherwise =
-    let trimmed = trimTrailingSlash text
-     in case rootInfo.sourcePrefix of
-          Nothing -> T.dropWhile (== '/') trimmed
-          Just prefix ->
-            let prefixTrimmed = trimTrailingSlash prefix
-                prefixed = ensureTrailingSlash prefixTrimmed
-                trimmedWithSlash = ensureTrailingSlash trimmed
-             in case T.stripPrefix prefixed trimmedWithSlash of
-                  Just rest -> T.dropWhile (== '/') rest
-                  Nothing ->
-                    if trimmed == prefixTrimmed
-                      then ""
-                      else T.dropWhile (== '/') trimmed
-
-  reapplyPrefix :: Text -> Text
-  reapplyPrefix rel
-    | T.null rel = "."
-    | otherwise = applySourcePrefix rel
-
   nearestBuckDir :: DirName -> Maybe DirName
-  nearestBuckDir dir = find (`Set.member` buckDirs) (dirLineage dir)
-
-  dirLineage :: DirName -> [DirName]
-  dirLineage dir = dir : maybe [] dirLineage (dirParent dir)
-
-  dirParent :: DirName -> Maybe DirName
-  dirParent current =
-    let currentText = dirNameToText current
-        rel = stripSourcePrefix currentText
-        segments = filter (not . T.null) (T.splitOn "/" rel)
-     in case segments of
-          [] ->
-            if currentText == "."
-              then Nothing
-              else Just (DirName ".")
-          [_] -> Just (DirName ".")
-          _ ->
-            let parentSegs = take (length segments - 1) segments
-             in Just (DirName (reapplyPrefix (T.intercalate "/" parentSegs)))
+  nearestBuckDir = nearestBuckDirFor rootInfo buckDirs
 
 moduleDirectory :: RootDirectory -> FilePath -> DirName
 moduleDirectory rootInfo filePath =
@@ -610,7 +616,6 @@ normalizeRootDirectory path rootBuck = do
       label = maybe "." ensureTrailingSlash sourcePrefix
   pure RootDirectory {rootPath = normalizedRoot, rootLabel = label, sourcePrefix}
 
-
 resolveSourceDir :: RootDirectory -> FilePath -> IO FilePath
 resolveSourceDir root dir = do
   absInput <- makeAbsolute dir
@@ -630,6 +635,56 @@ resolveRecursiveTargetDir root dir = do
   resolvedDir <- resolveSourceDir root dir
   let normalized = dropTrailingPathSeparator (normalise resolvedDir)
   pure (DirName (directoryText root normalized))
+
+applySourcePrefix :: RootDirectory -> Text -> Text
+applySourcePrefix rootInfo rel =
+  case rootInfo.sourcePrefix of
+    Nothing -> rel
+    Just prefix -> ensureTrailingSlash prefix <> rel
+
+stripSourcePrefix :: RootDirectory -> Text -> Text
+stripSourcePrefix rootInfo text
+  | text == "." = ""
+  | otherwise =
+      let trimmed = trimTrailingSlash text
+       in case rootInfo.sourcePrefix of
+            Nothing -> T.dropWhile (== '/') trimmed
+            Just prefix ->
+              let prefixTrimmed = trimTrailingSlash prefix
+                  prefixed = ensureTrailingSlash prefixTrimmed
+                  trimmedWithSlash = ensureTrailingSlash trimmed
+               in case T.stripPrefix prefixed trimmedWithSlash of
+                    Just rest -> T.dropWhile (== '/') rest
+                    Nothing ->
+                      if trimmed == prefixTrimmed
+                        then ""
+                        else T.dropWhile (== '/') trimmed
+
+reapplyPrefix :: RootDirectory -> Text -> Text
+reapplyPrefix rootInfo rel
+  | T.null rel = "."
+  | otherwise = applySourcePrefix rootInfo rel
+
+nearestBuckDirFor :: RootDirectory -> Set DirName -> DirName -> Maybe DirName
+nearestBuckDirFor rootInfo buckDirs dir = find (`Set.member` buckDirs) (dirLineageFrom rootInfo dir)
+
+dirLineageFrom :: RootDirectory -> DirName -> [DirName]
+dirLineageFrom rootInfo dir = dir : maybe [] (dirLineageFrom rootInfo) (dirParentOf rootInfo dir)
+
+dirParentOf :: RootDirectory -> DirName -> Maybe DirName
+dirParentOf rootInfo current =
+  let currentText = dirNameToText current
+      rel = stripSourcePrefix rootInfo currentText
+      segments = filter (not . T.null) (T.splitOn "/" rel)
+   in case segments of
+        [] ->
+          if currentText == "."
+            then Nothing
+            else Just (DirName ".")
+        [_] -> Just (DirName ".")
+        _ ->
+          let parentSegs = take (length segments - 1) segments
+           in Just (DirName (reapplyPrefix rootInfo (T.intercalate "/" parentSegs)))
 
 resolveRootTargetDir :: RootDirectory -> FilePath -> IO DirName
 resolveRootTargetDir _ _ = pure (DirName ".")
@@ -886,29 +941,107 @@ finalizeGraph state =
       moduleAssignments = HM.union generatedAssignments preassignedAssignments
    in MaxDirTargetGraph {targets, moduleToTarget = moduleAssignments, rootInfo = state.rootInfo}
 
+moduleTargetsFromInfos :: RootDirectory -> DirName -> Set DirName -> Bool -> HashMap Hir.ModuleText ModuleInfo -> ModuleTargetOverrides -> BuildGraphOutput
+moduleTargetsFromInfos rootInfo rootTargetDir buckDirs hasOverrideMap moduleInfos overrides =
+  BuildGraphOutput
+    { targets = map mkTarget sortedLocalModules
+    , moduleToTarget = HM.union localAssignments overrideAssignments
+    }
+ where
+  ModuleTargetOverrides overrideMap = overrides
+
+  sortedLocalModules :: [(Hir.ModuleText, ModuleInfo, DirName)]
+  sortedLocalModules =
+    sortOn
+      (moduleTextToText . selectModule)
+      [ (moduleName, info, effectiveDir moduleDir)
+      | (moduleName, info) <- HM.toList moduleInfos
+      , LocalModule moduleDir <- [info.location]
+      , not (HM.member moduleName overrideMap)
+      ]
+   where
+    selectModule (moduleName, _, _) = moduleName
+
+  effectiveDir :: DirName -> DirName
+  effectiveDir moduleDir
+    | hasOverrideMap = fromMaybe rootTargetDir (nearestBuckDirFor rootInfo buckDirs moduleDir)
+    | otherwise = moduleDir
+
+  mkTarget :: (Hir.ModuleText, ModuleInfo, DirName) -> TargetOutput
+  mkTarget (moduleName, info, dir) =
+    let key = ModuleTargetOutput (moduleName.text)
+     in TargetOutput
+      { key = key
+      , targetName = renderName rootInfo dir moduleName
+      , directory = dirNameToText dir
+      , modules = [moduleTextToText moduleName]
+      , dependsOn = map moduleTextToText (Set.toList (moduleDependencies info))
+      }
+
+  moduleDependencies :: ModuleInfo -> Set Hir.ModuleText
+  moduleDependencies info = Set.delete info.name info.imports
+
+  localAssignments :: HashMap Text Text
+  localAssignments =
+    HM.fromList
+      [ (moduleTextToText moduleName, renderName rootInfo dir moduleName)
+      | (moduleName, _, dir) <- sortedLocalModules
+      ]
+
+  overrideAssignments :: HashMap Text Text
+  overrideAssignments =
+    HM.fromList
+      [
+        ( moduleTextToText moduleName
+        , targetNameFromKeyOutput (ExternalTargetOutput target)
+        )
+      | (moduleName, TargetOverride target) <- HM.toList overrideMap
+      , HM.member moduleName moduleInfos
+      ]
+
 graphToOutput :: MaxDirTargetGraph -> BuildGraphOutput
 graphToOutput graph =
   BuildGraphOutput
-    { targets = map targetToOutput (HM.elems graph.targets)
+    { targets = targetOutputs
     , moduleToTarget = moduleAssignments
     }
  where
+  rootInfo = graph.rootInfo
+
+  targetPairs :: [(TargetKey, TargetOutput)]
+  targetPairs =
+    [ (target.key, targetToOutput target)
+    | target <- HM.elems graph.targets
+    ]
+
+  targetOutputs :: [TargetOutput]
+  targetOutputs = map snd targetPairs
+
+  targetNameMap :: HashMap TargetKey Text
+  targetNameMap = HM.fromList [(key, output.targetName) | (key, output) <- targetPairs]
+
   targetToOutput :: Target -> TargetOutput
   targetToOutput target =
-    TargetOutput
-      { key = keyOutput target.key
-      , directory = dirNameToText target.dir
-      , modules = map qualifiedModuleName (Set.toList target.modules)
-      , dependsOn = map qualifiedModuleName (Set.toList target.dependsOn)
-      }
+    let keyOut = keyOutput target.key
+        name =
+          case target.key of
+            ModuleTarget moduleName -> renderName rootInfo target.dir moduleName
+            _ -> targetNameFromKeyOutput keyOut
+     in TargetOutput
+          { key = keyOut
+          , targetName = name
+          , directory = dirNameToText target.dir
+          , modules = map qualifiedModuleName (Set.toList target.modules)
+          , dependsOn = map qualifiedModuleName (Set.toList target.dependsOn)
+          }
 
   qualifiedModuleName :: Hir.ModuleText -> Text
   qualifiedModuleName moduleName = moduleName.text
 
-  moduleAssignments :: HashMap Text TargetKeyOutput
+  moduleAssignments :: HashMap Text Text
   moduleAssignments =
     HM.fromList
-      [ (qualifiedModuleName moduleName, assignmentOutput assignment)
+      [ (qualifiedModuleName moduleName, assignmentTargetName assignment)
       | (moduleName, assignment) <- HM.toList graph.moduleToTarget
       ]
 
@@ -919,11 +1052,11 @@ graphToOutput graph =
       RecursiveDirectoryTarget dirName -> RecursiveDirectoryTargetOutput (dirNameToText dirName)
       ModuleTarget moduleName -> ModuleTargetOutput moduleName.text
 
-  assignmentOutput :: ModuleTargetAssignment -> TargetKeyOutput
-  assignmentOutput assignment =
+  assignmentTargetName :: ModuleTargetAssignment -> Text
+  assignmentTargetName assignment =
     case assignment of
-      AssignedTarget key -> keyOutput key
-      PreassignedTarget (TargetOverride target) -> ExternalTargetOutput target
+      AssignedTarget key -> HM.lookupDefault (targetNameFromKeyOutput (keyOutput key)) key targetNameMap
+      PreassignedTarget (TargetOverride target) -> target
 
 renderBuildGraphError :: BuildGraphError -> String
 renderBuildGraphError err =
@@ -962,12 +1095,6 @@ renderBuildGraphError err =
       RecursiveDirectoryTarget dirName -> "recursiveDirectory:" <> dirNameToText dirName
       ModuleTarget moduleName -> "module:" <> moduleName.text
 
-dirNameToText :: DirName -> Text
-dirNameToText (DirName text) = text
-
-moduleTextToText :: Hir.ModuleText -> Text
-moduleTextToText = (.text)
-
 parseProgramFromFile :: FilePath -> IO Hir.Read.Program
 parseProgramFromFile file = do
   bytes <- BS.readFile file
@@ -979,30 +1106,24 @@ directoryText root dirPath =
   let relativeRaw = makeRelative root.rootPath dirPath
       relative = normalise relativeRaw
    in case () of
-        _ | relative == "." || null relative -> root.rootLabel
+        _
+          | relative == "." || null relative -> root.rootLabel
           | isOutsideRoot relative -> pathToText dirPath
           | otherwise -> formatInside relative
  where
   isOutsideRoot rel = ".." `List.isPrefixOf` rel
 
   formatInside rel =
-    let relText = stripLeadingSlash (pathToText rel)
+    let relText = stripLeadingSlashes (pathToText rel)
      in case root.sourcePrefix of
           Nothing -> relText
           Just prefix -> ensureTrailingSlash prefix <> relText
-
-  stripLeadingSlash = T.dropWhile (== '/')
 
 ensureTrailingSlash :: Text -> Text
 ensureTrailingSlash txt
   | T.null txt = txt
   | T.isSuffixOf "/" txt = txt
   | otherwise = txt <> "/"
-
-trimTrailingSlash :: Text -> Text
-trimTrailingSlash txt
-  | T.null txt = txt
-  | otherwise = T.dropWhileEnd (== '/') txt
 
 pathToText :: FilePath -> Text
 pathToText fp =

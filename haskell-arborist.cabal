@@ -64,6 +64,7 @@ library
       Arborist.TreeSitter
       BuildGraph.Directory
       BuildGraph.GroupCandidates
+      BuildGraph.ModuleTargetOverrides
       Data.Change
       Data.Edit
       Data.Path
@@ -88,7 +89,6 @@ library
       Scripts.RequiredTargetFiles
   other-modules:
       BuildGraph.Directory.TH
-      BuildGraph.ModuleTargetOverrides
   hs-source-dirs:
       src
   default-extensions:
@@ -156,6 +156,8 @@ library
 
 executable haskell-arborist
   main-is: Main.hs
+  other-modules:
+      Paths_haskell_arborist
   hs-source-dirs:
       app
   default-extensions:
@@ -230,6 +232,7 @@ test-suite haskell-arborist-test
       Arborist.AutoExportSpec
       Arborist.AutoImportSpec
       Arborist.AutoQualifySpec
+      Arborist.BuildGraphSpec
       Arborist.FilesSpec
       Arborist.HirSpec
       Arborist.ProgramIndexSpec

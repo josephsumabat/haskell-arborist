@@ -1,24 +1,22 @@
 module Main where
 
 import Arborist.Reexports (runDeleteEmptyHidingImports, runDeleteEmptyImports, runReplaceReexports)
-import BuildGraph.Directory
-  ( BuildGraphOutput (..)
-  , DirName (..)
-  , TargetKeyOutput (..)
-  , TargetOutput (..)
-  , buildGraphFromDirectoriesWithRecursiveTargets
-  , graphToOutput
-  , renderBuildGraphError
-  )
+import BuildGraph.Directory (
+  BuildGraphOutput (..),
+  DirName (..),
+  TargetKeyOutput (..),
+  TargetOutput (..),
+  buildModuleTargetGraph,
+ )
 import BuildGraph.GroupCandidates (groupOutputCandidates)
 import Control.Monad (when)
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy.Char8 as BL8
-import Data.Maybe (isJust, mapMaybe)
+import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy.Char8 qualified as BL8
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (mapMaybe)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Diagnostics.Fixes (runAllFixes)
-import Data.List.NonEmpty qualified as NE
 import Options.Applicative (Parser, ParserInfo)
 import Options.Applicative qualified as Opt
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
@@ -26,6 +24,7 @@ import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
 import Scripts.ModuleFiles (ModuleFilesOptions (..), runModuleFiles)
 import Scripts.RequiredTargetFiles (RequiredTargetFilesOptions (..), runRequiredTargetFiles)
 import System.Exit (die)
+import System.IO (hPutStrLn, stderr)
 
 data Command
   = DetectCycles
@@ -92,164 +91,174 @@ commandParser =
       <> command "rename-module-prefix" RenameModulePrefix "Rename a module prefix via interactive prompt"
       <> command "delete-empty-imports" DeleteEmptyImports "Remove empty import declarations"
       <> command "delete-empty-hiding-imports" DeleteEmptyHidingImports "Remove import declarations with empty hiding clauses"
-      <> Opt.command "dump-renamed-ast"
-        ( Opt.info (DumpRenamedAst <$> dumpRenamedAstOptionsParser)
+      <> Opt.command
+        "dump-renamed-ast"
+        ( Opt.info
+            (DumpRenamedAst <$> dumpRenamedAstOptionsParser)
             (Opt.progDesc "Write the renamed AST for a source file to disk")
         )
-      <> Opt.command "dump-target-graph"
-        ( Opt.info (DumpTargetGraph <$> dumpTargetGraphOptionsParser)
+      <> Opt.command
+        "dump-target-graph"
+        ( Opt.info
+            (DumpTargetGraph <$> dumpTargetGraphOptionsParser)
             (Opt.progDesc "Emit the maximal acyclic directory target graph as JSON")
         )
-      <> Opt.command "group-candidates"
-        ( Opt.info (GroupCandidates <$> groupCandidatesOptionsParser)
+      <> Opt.command
+        "group-candidates"
+        ( Opt.info
+            (GroupCandidates <$> groupCandidatesOptionsParser)
             (Opt.progDesc "Merge eligible module targets in an existing BuildGraphOutput")
         )
-      <> Opt.command "module-files"
-        ( Opt.info (ModuleFiles <$> moduleFilesOptionsParser)
+      <> Opt.command
+        "module-files"
+        ( Opt.info
+            (ModuleFiles <$> moduleFilesOptionsParser)
             (Opt.progDesc "Resolve modules to source files and emit a JSON object mapping them")
         )
-      <> Opt.command "required-target-files"
-        ( Opt.info (RequiredTargetFiles <$> requiredTargetFilesOptionsParser)
+      <> Opt.command
+        "required-target-files"
+        ( Opt.info
+            (RequiredTargetFiles <$> requiredTargetFilesOptionsParser)
             (Opt.progDesc "List unique source files directly imported by the provided modules")
         )
       <> Opt.metavar "COMMAND"
-  where
-    command name cmd desc =
-      Opt.command name $
-        Opt.info (pure cmd) (Opt.progDesc desc)
+ where
+  command name cmd desc =
+    Opt.command name $
+      Opt.info (pure cmd) (Opt.progDesc desc)
 
-    dumpRenamedAstOptionsParser :: Parser DumpRenamedAstOptions
-    dumpRenamedAstOptionsParser =
-      DumpRenamedAstOptions
-        <$> Opt.strOption
-          ( Opt.long "source"
-              <> Opt.short 's'
-              <> Opt.metavar "FILE"
-              <> Opt.help "Path to the Haskell source file to process"
-          )
-        <*> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "output"
-                  <> Opt.short 'o'
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "Destination file for the renamed AST dump (defaults to stdout)"
-              )
-          )
-        <*> Opt.strOption
-          ( Opt.long "config"
-              <> Opt.metavar "FILE"
-              <> Opt.help "Path to the Arborist configuration JSON"
-          )
-
-    dumpTargetGraphOptionsParser :: Parser DumpTargetGraphOptions
-    dumpTargetGraphOptionsParser =
-      DumpTargetGraphOptions
-        <$> Opt.strOption
-          ( Opt.long "src-root"
-              <> Opt.metavar "DIR"
-              <> Opt.help "Root directory containing the listed source directories"
-          )
-        <*> Opt.strOption
-          ( Opt.long "root"
-              <> Opt.metavar "DIR"
-              <> Opt.help "Directory containing the root-level BUCK file"
-          )
-        <*> Opt.many
-          ( Opt.strArgument
-              ( Opt.metavar "[DIRECTORY...]"
-                  <> Opt.help "Optional source directories containing Haskell modules (defaults to the root directory)"
-              )
-          )
-        <*> Opt.many
-          ( Opt.strOption
-              ( Opt.long "recursive-target"
-                  <> Opt.metavar "DIR"
-                  <> Opt.help "Directory to treat as a recursive target (may be provided multiple times)"
-              )
-          )
-        <*> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "module-target-overrides"
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "JSON file containing module target overrides"
-              )
-          )
-
-    moduleFilesOptionsParser :: Parser ModuleFilesOptions
-    moduleFilesOptionsParser =
-      ModuleFilesOptions
-        <$> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "config"
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "Optional path to the Arborist JSON configuration"
-              )
-          )
-        <*> ( NE.fromList . map T.pack
-                <$> Opt.some
-                  ( Opt.strArgument
-                      ( Opt.metavar "MODULE..."
-                          <> Opt.help "One or more module names to resolve"
-                      )
-                  )
+  dumpRenamedAstOptionsParser :: Parser DumpRenamedAstOptions
+  dumpRenamedAstOptionsParser =
+    DumpRenamedAstOptions
+      <$> Opt.strOption
+        ( Opt.long "source"
+            <> Opt.short 's'
+            <> Opt.metavar "FILE"
+            <> Opt.help "Path to the Haskell source file to process"
+        )
+      <*> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "output"
+                <> Opt.short 'o'
+                <> Opt.metavar "FILE"
+                <> Opt.help "Destination file for the renamed AST dump (defaults to stdout)"
             )
+        )
+      <*> Opt.strOption
+        ( Opt.long "config"
+            <> Opt.metavar "FILE"
+            <> Opt.help "Path to the Arborist configuration JSON"
+        )
 
-    requiredTargetFilesOptionsParser :: Parser RequiredTargetFilesOptions
-    requiredTargetFilesOptionsParser =
-      RequiredTargetFilesOptions
-        <$> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "config"
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "Optional path to the Arborist JSON configuration"
-              )
-          )
-        <*> ( NE.fromList . map T.pack
-                <$> Opt.some
-                  ( Opt.strArgument
-                      ( Opt.metavar "MODULE..."
-                          <> Opt.help "One or more module names to analyze"
-                      )
-                  )
+  dumpTargetGraphOptionsParser :: Parser DumpTargetGraphOptions
+  dumpTargetGraphOptionsParser =
+    DumpTargetGraphOptions
+      <$> Opt.strOption
+        ( Opt.long "src-root"
+            <> Opt.metavar "DIR"
+            <> Opt.help "Root directory containing the listed source directories"
+        )
+      <*> Opt.strOption
+        ( Opt.long "root"
+            <> Opt.metavar "DIR"
+            <> Opt.help "Directory containing the root-level BUCK file"
+        )
+      <*> Opt.many
+        ( Opt.strArgument
+            ( Opt.metavar "[DIRECTORY...]"
+                <> Opt.help "Optional source directories containing Haskell modules (defaults to the root directory)"
             )
+        )
+      <*> Opt.many
+        ( Opt.strOption
+            ( Opt.long "recursive-target"
+                <> Opt.metavar "DIR"
+                <> Opt.help "Directory to treat as a recursive target (may be provided multiple times)"
+            )
+        )
+      <*> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "module-target-overrides"
+                <> Opt.metavar "FILE"
+                <> Opt.help "JSON file containing module target overrides"
+            )
+        )
 
-    groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
-    groupCandidatesOptionsParser =
-      GroupCandidatesOptions
-        <$> Opt.optional
-          ( Opt.strOption
-              ( Opt.long "input"
-                  <> Opt.short 'i'
-                  <> Opt.metavar "FILE"
-                  <> Opt.help "Path to BuildGraphOutput JSON (defaults to stdin)"
-              )
-          )
-        <*> Opt.many
-          ( DirName . T.pack
-              <$> Opt.strOption
-                ( Opt.long "directory"
-                    <> Opt.short 'd'
-                    <> Opt.metavar "TARGET"
-                    <> Opt.help "Directory target to restrict merging (may be provided multiple times)"
+  moduleFilesOptionsParser :: Parser ModuleFilesOptions
+  moduleFilesOptionsParser =
+    ModuleFilesOptions
+      <$> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "config"
+                <> Opt.metavar "FILE"
+                <> Opt.help "Optional path to the Arborist JSON configuration"
+            )
+        )
+      <*> ( NE.fromList . map T.pack
+              <$> Opt.some
+                ( Opt.strArgument
+                    ( Opt.metavar "MODULE..."
+                        <> Opt.help "One or more module names to resolve"
+                    )
                 )
           )
-        <*> Opt.many
-          ( T.pack
-              <$> Opt.strOption
-                ( Opt.long "module-prefix"
-                    <> Opt.short 'm'
-                    <> Opt.metavar "MODULE"
-                    <> Opt.help "Module prefix to merge across matching directory targets (may be provided multiple times)"
+
+  requiredTargetFilesOptionsParser :: Parser RequiredTargetFilesOptions
+  requiredTargetFilesOptionsParser =
+    RequiredTargetFilesOptions
+      <$> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "config"
+                <> Opt.metavar "FILE"
+                <> Opt.help "Optional path to the Arborist JSON configuration"
+            )
+        )
+      <*> ( NE.fromList . map T.pack
+              <$> Opt.some
+                ( Opt.strArgument
+                    ( Opt.metavar "MODULE..."
+                        <> Opt.help "One or more module names to analyze"
+                    )
                 )
           )
-        <*> Opt.switch
-          ( Opt.long "group-recursive"
-              <> Opt.help "Automatically group directories that were emitted as recursive targets"
-          )
-        <*> Opt.switch
-          ( Opt.long "group-all"
-              <> Opt.help "Attempt to group every directory in the BuildGraphOutput"
-          )
+
+  groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
+  groupCandidatesOptionsParser =
+    GroupCandidatesOptions
+      <$> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "input"
+                <> Opt.short 'i'
+                <> Opt.metavar "FILE"
+                <> Opt.help "Path to BuildGraphOutput JSON (defaults to stdin)"
+            )
+        )
+      <*> Opt.many
+        ( DirName . T.pack
+            <$> Opt.strOption
+              ( Opt.long "directory"
+                  <> Opt.short 'd'
+                  <> Opt.metavar "TARGET"
+                  <> Opt.help "Directory target to restrict merging (may be provided multiple times)"
+              )
+        )
+      <*> Opt.many
+        ( T.pack
+            <$> Opt.strOption
+              ( Opt.long "module-prefix"
+                  <> Opt.short 'm'
+                  <> Opt.metavar "MODULE"
+                  <> Opt.help "Module prefix to merge across matching directory targets (may be provided multiple times)"
+              )
+        )
+      <*> Opt.switch
+        ( Opt.long "group-recursive"
+            <> Opt.help "Automatically group directories that were emitted as recursive targets"
+        )
+      <*> Opt.switch
+        ( Opt.long "group-all"
+            <> Opt.help "Attempt to group every directory in the BuildGraphOutput"
+        )
 
 runDumpTargetGraph :: DumpTargetGraphOptions -> IO ()
 runDumpTargetGraph DumpTargetGraphOptions {srcRootDir, rootBuckDir, srcDirs, recursiveTargetDirs, overrideMapPath} = do
@@ -262,13 +271,11 @@ runDumpTargetGraph DumpTargetGraphOptions {srcRootDir, rootBuckDir, srcDirs, rec
         case Aeson.eitherDecode bytes of
           Left err -> die ("Failed to parse module target overrides from " <> path <> ": " <> err)
           Right parsed -> pure (Just parsed)
-  when (isJust overrides && not (null recursiveTargetDirs)) $
-    die "Recursive target directories cannot be provided when module target overrides are in use"
+  when (not (null recursiveTargetDirs)) $
+    hPutStrLn stderr "Recursive target directories are ignored in module-level graphs"
 
-  result <- buildGraphFromDirectoriesWithRecursiveTargets srcRootDir rootBuckDir effectiveSrcDirs recursiveTargetDirs overrides
-  case result of
-    Left err -> die (renderBuildGraphError err)
-    Right graph -> BL8.putStrLn (Aeson.encode (graphToOutput graph))
+  graph <- buildModuleTargetGraph srcRootDir rootBuckDir effectiveSrcDirs overrides
+  BL8.putStrLn (Aeson.encode graph)
 
 runGroupCandidates :: GroupCandidatesOptions -> IO ()
 runGroupCandidates GroupCandidatesOptions {candidatesInput, candidatesDirectories, candidatesModulePrefixes, groupRecursive, groupAll} = do

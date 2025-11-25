@@ -35,7 +35,7 @@ data MergeStrategy
 
 data OutputGraphState = OutputGraphState
   { ogTargets :: !(HashMap TargetNodeId OutputTargetState)
-  , ogModuleToTarget :: !(HashMap Text TargetKeyOutput)
+  , ogModuleToTarget :: !(HashMap Text Text)
   , ogTargetDeps :: !(HashMap TargetNodeId (Set TargetNodeId))
   , ogReverseTargetDeps :: !(HashMap TargetNodeId (Set TargetNodeId))
   }
@@ -43,6 +43,7 @@ data OutputGraphState = OutputGraphState
 data OutputTargetState = OutputTargetState
   { otKey :: !TargetKeyOutput
   , otKeyId :: !TargetNodeId
+  , otTargetName :: !Text
   , otDirectory :: !Text
   , otModules :: !(Set Text)
   , otDependsOn :: !(Set Text)
@@ -118,15 +119,17 @@ explodeDirectoryModules state dir
       (\(mAcc, tAcc) moduleName ->
           let newKey = ModuleTargetOutput moduleName
               newId = targetKeyId newKey
+              newTargetName = renderOutputTargetName target.otDirectory moduleName
               newTarget =
                 OutputTargetState
                   { otKey = newKey
                   , otKeyId = newId
+                  , otTargetName = newTargetName
                   , otDirectory = target.otDirectory
                   , otModules = Set.singleton moduleName
                   , otDependsOn = target.otDependsOn
                   }
-           in ( HM.insert moduleName newKey mAcc
+           in ( HM.insert moduleName newTargetName mAcc
               , HM.insert newId newTarget tAcc
               )
       )
@@ -253,16 +256,21 @@ mergeModuleTargets state dir destId sourceId = do
       let mergedModules = Set.union destTarget.otModules sourceTarget.otModules
           combinedDeps = Set.union destTarget.otDependsOn sourceTarget.otDependsOn
           filteredDeps = Set.difference combinedDeps mergedModules
-          updatedTarget =
+          targetBase =
             destTarget
               { otModules = mergedModules
               , otDependsOn = filteredDeps
+              }
+          updatedTarget =
+            targetBase
+              { otTargetName =
+                  maybe destTarget.otTargetName (renderOutputTargetName destTarget.otDirectory) (targetPrimaryModule targetBase)
               }
           targets' =
             HM.insert destId updatedTarget (HM.delete sourceId state.ogTargets)
           moduleToTarget' =
             foldl'
-              (\acc moduleName -> HM.insert moduleName destTarget.otKey acc)
+              (\acc moduleName -> HM.insert moduleName updatedTarget.otTargetName acc)
               state.ogModuleToTarget
               (Set.toList sourceTarget.otModules)
           affectedTargets =
@@ -314,10 +322,11 @@ outputToState BuildGraphOutput {targets, moduleToTarget} =
   reverseDeps = invertDependencies targetDeps
 
 toState :: TargetOutput -> OutputTargetState
-toState TargetOutput {key, directory, modules, dependsOn} =
+toState TargetOutput {key, targetName, directory, modules, dependsOn} =
   OutputTargetState
     { otKey = key
     , otKeyId = targetKeyId key
+    , otTargetName = targetName
     , otDirectory = directory
     , otModules = Set.fromList modules
     , otDependsOn = Set.fromList dependsOn
@@ -334,9 +343,10 @@ stateToOutput OutputGraphState {ogTargets, ogModuleToTarget} =
     }
 
 toOutput :: OutputTargetState -> TargetOutput
-toOutput OutputTargetState {otKey, otDirectory, otModules, otDependsOn} =
+toOutput OutputTargetState {otKey, otTargetName, otDirectory, otModules, otDependsOn} =
   TargetOutput
     { key = otKey
+    , targetName = otTargetName
     , directory = otDirectory
     , modules = List.sort (Set.toList otModules)
     , dependsOn = List.sort (Set.toList otDependsOn)
@@ -382,9 +392,33 @@ formatMergeResult dir destId sourceId succeeded attempt total =
   percentage _ tot | tot <= 0 = 100
   percentage att tot = (att * 100) `div` tot
 
+renderOutputTargetName :: Text -> Text -> Text
+renderOutputTargetName dir moduleName =
+  "//" <> normalizeDirectory dir <> ":" <> moduleTargetSlug moduleName
+
+normalizeDirectory :: Text -> Text
+normalizeDirectory text =
+  case cleaned of
+    "" -> ""
+    "." -> ""
+    other -> stripLeadingSlashes other
+ where
+  cleaned = trimTrailingSlash text
+
+stripLeadingSlashes :: Text -> Text
+stripLeadingSlashes = Text.dropWhile (== '/')
+
+trimTrailingSlash :: Text -> Text
+trimTrailingSlash txt
+  | Text.null txt = txt
+  | otherwise = Text.dropWhileEnd (== '/') txt
+
+moduleTargetSlug :: Text -> Text
+moduleTargetSlug = Text.toLower . Text.replace "." "_"
+
 recomputeDependencies ::
   HashMap TargetNodeId OutputTargetState ->
-  HashMap Text TargetKeyOutput ->
+  HashMap Text Text ->
   HashMap TargetNodeId (Set TargetNodeId) ->
   TargetNodeId ->
   [TargetNodeId] ->
@@ -395,11 +429,12 @@ recomputeDependencies targets moduleToTarget oldDeps removedTarget affectedTarge
     (HM.delete removedTarget oldDeps)
     affectedTargets
  where
+  nameIndex = targetNameIndex targets
   updateDeps acc targetId =
     case HM.lookup targetId targets of
       Nothing -> acc
       Just targetState ->
-        HM.insert targetId (targetDependencies moduleToTarget targetState) acc
+        HM.insert targetId (targetDependencies moduleToTarget nameIndex targetState) acc
 
 recomputeReverseDependencies ::
   HashMap TargetNodeId (Set TargetNodeId) ->
@@ -464,27 +499,32 @@ createsCycle adjMap targetId =
 
 computeTargetDependencies ::
   HashMap TargetNodeId OutputTargetState ->
-  HashMap Text TargetKeyOutput ->
+  HashMap Text Text ->
   HashMap TargetNodeId (Set TargetNodeId)
 computeTargetDependencies targets moduleToTarget =
-  HM.map (targetDependencies moduleToTarget) targets
+  let nameIndex = targetNameIndex targets
+   in HM.map (targetDependencies moduleToTarget nameIndex) targets
 
-targetDependencies :: HashMap Text TargetKeyOutput -> OutputTargetState -> Set TargetNodeId
-targetDependencies moduleToTarget target =
+targetDependencies ::
+  HashMap Text Text ->
+  HashMap Text TargetNodeId ->
+  OutputTargetState ->
+  Set TargetNodeId
+targetDependencies moduleToTarget nameIndex target =
   Set.fromList
-    [ targetKeyId depKey
+    [ depId
     | moduleName <- Set.toList target.otDependsOn
-    , Just assignment <- [HM.lookup moduleName moduleToTarget]
-    , depKey <- assignmentTargetKeys assignment
-    , let depId = targetKeyId depKey
+    , Just assignedName <- [HM.lookup moduleName moduleToTarget]
+    , Just depId <- [HM.lookup assignedName nameIndex]
     , depId /= target.otKeyId
     ]
 
-assignmentTargetKeys :: TargetKeyOutput -> [TargetKeyOutput]
-assignmentTargetKeys assignment =
-  case assignment of
-    ExternalTargetOutput _ -> []
-    key -> [key]
+targetNameIndex :: HashMap TargetNodeId OutputTargetState -> HashMap Text TargetNodeId
+targetNameIndex targets =
+  HM.fromList
+    [ (targetState.otTargetName, targetId)
+    | (targetId, targetState) <- HM.toList targets
+    ]
 
 invertDependencies :: HashMap TargetNodeId (Set TargetNodeId) -> HashMap TargetNodeId (Set TargetNodeId)
 invertDependencies deps =
