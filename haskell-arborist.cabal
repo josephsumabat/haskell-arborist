@@ -49,6 +49,7 @@ library
       Arborist.Haddock
       Arborist.ModExports
       Arborist.ModuleInfo
+      Arborist.PersistentModels
       Arborist.ProgramIndex
       Arborist.Reexports
       Arborist.Refactor.Module
@@ -235,6 +236,7 @@ test-suite haskell-arborist-test
       Arborist.BuildGraphSpec
       Arborist.FilesSpec
       Arborist.HirSpec
+      Arborist.PersistentModelsSpec
       Arborist.ProgramIndexSpec
       Arborist.Refactor.ModuleSpec
       Arborist.TransitiveReexportSpec
