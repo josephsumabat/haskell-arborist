@@ -48,6 +48,7 @@ data OutputTargetState = OutputTargetState
   , otDirectory :: !Text
   , otModules :: !(Set Text)
   , otDependsOn :: !(Set Text)
+  , otSrcDeps :: !(HashMap Text (Text, [Text]))
   }
 
 groupOutputCandidates :: BuildGraphOutput -> [DirName] -> [Text] -> BuildGraphOutput
@@ -130,6 +131,7 @@ explodeDirectoryModules state dir
                   , otDirectory = target.otDirectory
                   , otModules = Set.singleton moduleName
                   , otDependsOn = target.otDependsOn
+                  , otSrcDeps = maybe HM.empty (\entry -> HM.singleton moduleName entry) (HM.lookup moduleName target.otSrcDeps)
                   }
            in ( HM.insert moduleName newFullName mAcc
               , HM.insert newId newTarget tAcc
@@ -254,60 +256,68 @@ mergeModuleTargets state dir destId sourceId = do
   sourceTarget <- HM.lookup sourceId state.ogTargets
   if destTarget.otDirectory /= dir || sourceTarget.otDirectory /= dir
     then Nothing
-    else
-      let mergedModules = Set.union destTarget.otModules sourceTarget.otModules
-          combinedDeps = Set.union destTarget.otDependsOn sourceTarget.otDependsOn
-          filteredDeps = Set.difference combinedDeps mergedModules
-          targetBase =
-            destTarget
-              { otModules = mergedModules
-              , otDependsOn = filteredDeps
-              }
-          updatedTarget =
-            case targetPrimaryModule targetBase of
-              Nothing -> targetBase
-              Just moduleName ->
-                let (shortName, fullName) = renderOutputTargetNames destTarget.otDirectory moduleName
-                 in targetBase
-                      { otTargetName = shortName
-                      , otTargetKey = fullName
-                      }
-          targets' =
-            HM.insert destId updatedTarget (HM.delete sourceId state.ogTargets)
-          -- Keep moduleToTarget consistent with whatever key ends up representing
-          -- the merged target. When the destination target changes keys (because
-          -- the canonical module changes), we have to remap its existing modules
-          -- as well, otherwise later dependency analysis will still think they
-          -- point at the old target.
-          modulesNeedingUpdate =
-            if destTarget.otTargetKey == updatedTarget.otTargetKey
-              then sourceTarget.otModules
-              else mergedModules
-          moduleToTarget' =
-            foldl'
-              (\acc moduleName -> HM.insert moduleName updatedTarget.otTargetKey acc)
-              state.ogModuleToTarget
-              (Set.toList modulesNeedingUpdate)
-          affectedTargets =
-            Set.toList
-              ( Set.insert
-                  destId
-                  (HM.lookupDefault Set.empty sourceId state.ogReverseTargetDeps)
-              )
-          targetDeps' =
-            recomputeDependencies
-              targets'
-              moduleToTarget'
-              state.ogTargetDeps
-              sourceId
-              affectedTargets
-          reverseDeps' =
-            recomputeReverseDependencies
-              targetDeps'
-              state.ogReverseTargetDeps
-              state.ogTargetDeps
-              sourceId
-              affectedTargets
+  else
+    let mergedModules = Set.union destTarget.otModules sourceTarget.otModules
+        combinedDeps = Set.union destTarget.otDependsOn sourceTarget.otDependsOn
+        filteredDeps = Set.difference combinedDeps mergedModules
+        mergedSrcDeps = mergeSrcDepMaps destTarget.otSrcDeps sourceTarget.otSrcDeps
+        targetBase =
+          destTarget
+            { otModules = mergedModules
+            , otDependsOn = filteredDeps
+            , otSrcDeps = mergedSrcDeps
+            }
+        updatedTarget =
+          case targetPrimaryModule targetBase of
+            Nothing -> targetBase
+            Just moduleName ->
+              let (shortName, fullName) = renderOutputTargetNames destTarget.otDirectory moduleName
+               in targetBase
+                    { otTargetName = shortName
+                    , otTargetKey = fullName
+                    }
+
+        targets' =
+          HM.insert destId updatedTarget (HM.delete sourceId state.ogTargets)
+
+        -- Keep moduleToTarget consistent with whatever key ends up representing
+        -- the merged target. When the destination target changes keys (because
+        -- the canonical module changes), we have to remap its existing modules
+        -- as well, otherwise later dependency analysis will still think they
+        -- point at the old target.
+        modulesNeedingUpdate =
+          if destTarget.otTargetKey == updatedTarget.otTargetKey
+            then sourceTarget.otModules
+            else mergedModules
+
+        moduleToTarget' =
+          foldl'
+            (\acc moduleName -> HM.insert moduleName updatedTarget.otTargetKey acc)
+            state.ogModuleToTarget
+            (Set.toList modulesNeedingUpdate)
+
+        affectedTargets =
+          Set.toList
+            ( Set.insert
+                destId
+                (HM.lookupDefault Set.empty sourceId state.ogReverseTargetDeps)
+            )
+
+        targetDeps' =
+          recomputeDependencies
+            targets'
+            moduleToTarget'
+            state.ogTargetDeps
+            sourceId
+            affectedTargets
+
+        reverseDeps' =
+          recomputeReverseDependencies
+            targetDeps'
+            state.ogReverseTargetDeps
+            state.ogTargetDeps
+            sourceId
+            affectedTargets
        in if createsCycle targetDeps' destId
             then Nothing
             else
@@ -337,7 +347,7 @@ outputToState BuildGraphOutput {targets, moduleToTarget} =
   reverseDeps = invertDependencies targetDeps
 
 toState :: TargetOutput -> OutputTargetState
-toState TargetOutput {key, targetName, targetKey, directory, modules, dependsOn} =
+toState TargetOutput {key, targetName, targetKey, directory, modules, dependsOn, srcDeps} =
   OutputTargetState
     { otKey = key
     , otKeyId = targetKeyId key
@@ -346,7 +356,11 @@ toState TargetOutput {key, targetName, targetKey, directory, modules, dependsOn}
     , otDirectory = directory
     , otModules = Set.fromList modules
     , otDependsOn = Set.fromList dependsOn
+    , otSrcDeps = srcDepMap
     }
+ where
+  srcDepMap = HM.fromList (zip persistentModules srcDeps)
+  persistentModules = filter textHasPersistentModelsSegment (List.sort modules)
 
 stateToOutput :: OutputGraphState -> BuildGraphOutput
 stateToOutput OutputGraphState {ogTargets, ogModuleToTarget} =
@@ -359,7 +373,7 @@ stateToOutput OutputGraphState {ogTargets, ogModuleToTarget} =
     }
 
 toOutput :: OutputTargetState -> TargetOutput
-toOutput OutputTargetState {otKey, otTargetName, otTargetKey, otDirectory, otModules, otDependsOn} =
+toOutput OutputTargetState {otKey, otTargetName, otTargetKey, otDirectory, otModules, otDependsOn, otSrcDeps} =
   TargetOutput
     { key = otKey
     , targetName = otTargetName
@@ -367,6 +381,7 @@ toOutput OutputTargetState {otKey, otTargetName, otTargetKey, otDirectory, otMod
     , directory = otDirectory
     , modules = List.sort (Set.toList otModules)
     , dependsOn = List.sort (Set.toList otDependsOn)
+    , srcDeps = map snd (List.sortOn fst (HM.toList otSrcDeps))
     }
 
 isModuleKey :: TargetKeyOutput -> Bool
@@ -418,6 +433,20 @@ renderOutputTargetNames dir moduleName =
           "" -> "//:" <> slug
           other -> "//" <> other <> ":" <> slug
    in (slug, fullName)
+
+mergeSrcDepMaps :: HashMap Text (Text, [Text]) -> HashMap Text (Text, [Text]) -> HashMap Text (Text, [Text])
+mergeSrcDepMaps = HM.unionWith combine
+ where
+  combine (pathA, modelsA) (pathB, modelsB) =
+    (preferredPath pathA pathB, dedupe modelsA modelsB)
+  preferredPath a b
+    | Text.null a = b
+    | otherwise = a
+  dedupe xs ys = List.nub (xs ++ ys)
+
+textHasPersistentModelsSegment :: Text -> Bool
+textHasPersistentModelsSegment name =
+  "PersistentModels" `elem` Text.splitOn "." name
 
 normalizeDirectory :: Text -> Text
 normalizeDirectory text =
@@ -569,3 +598,4 @@ recomputeAllDependencies state =
     }
  where
   deps = computeTargetDependencies state.ogTargets state.ogModuleToTarget
+

@@ -12,6 +12,7 @@ module BuildGraph.Directory where
 
 import Arborist.Files (ModFileMap, buildModuleFileMap)
 import Arborist.GlobImports (globImportModules)
+import Arborist.PersistentModels qualified as PersistentModels
 import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps, gatherTransitiveDeps, getPrgs)
 import BuildGraph.Directory.TH (targetKeyTagModifier)
 import BuildGraph.ModuleTargetOverrides (
@@ -103,6 +104,7 @@ data Target = Target
   , dir :: DirName
   , modules :: Set Hir.ModuleText
   , dependsOn :: Set Hir.ModuleText
+  , persistentSrcDeps :: [(Hir.ModuleText, (Text, [Text]))]
   }
   deriving (Eq, Show)
 
@@ -132,6 +134,7 @@ data TargetOutput = TargetOutput
   , directory :: Text
   , modules :: [Text]
   , dependsOn :: [Text]
+  , srcDeps :: [(Text, [Text])]
   }
   deriving (Eq, Show, Generic)
 
@@ -158,8 +161,12 @@ dirNameToText (DirName text) = text
 moduleTextToText :: Hir.ModuleText -> Text
 moduleTextToText = (.text)
 
+persistentModelsRoot :: Text
+persistentModelsRoot = "config/modelsFiles"
+
 stripLeadingSlashes :: Text -> Text
 stripLeadingSlashes = T.dropWhile (== '/')
+
 
 trimTrailingSlash :: Text -> Text
 trimTrailingSlash txt
@@ -202,6 +209,8 @@ data ModuleInfo = ModuleInfo
   { name :: Hir.ModuleText
   , location :: ModuleLocation
   , imports :: Set Hir.ModuleText
+  , sourceFile :: Maybe Text
+  , persistentModels :: [Text]
   }
   deriving (Eq, Show)
 
@@ -389,12 +398,16 @@ buildModuleInfos rootInfo programIndex fullModFileMap =
         { name = moduleName
         , location = LocalModule (moduleDirectory rootInfo filePath)
         , imports = moduleImports
+        , sourceFile = Just (pathToText filePath)
+        , persistentModels = PersistentModels.requiredModelFiles program
         }
     externalInfo =
       ModuleInfo
         { name = moduleName
         , location = ExternalModule
         , imports = moduleImports
+        , sourceFile = Nothing
+        , persistentModels = PersistentModels.requiredModelFiles program
         }
 
     moduleImports =
@@ -895,6 +908,33 @@ collectModuleDeps state key targetState =
           , HM.lookup depName state.moduleToTarget /= Just key
           ]
 
+modulePersistentEntries :: HashMap Hir.ModuleText ModuleInfo -> Set Hir.ModuleText -> [(Hir.ModuleText, (Text, [Text]))]
+modulePersistentEntries infoMap moduleNames =
+  List.sortOn (moduleTextToText . fst) (mapMaybe entry (Set.toList moduleNames))
+ where
+  entry moduleName = do
+    info <- HM.lookup moduleName infoMap
+    dep <- modulePersistentSrcDeps moduleName info
+    pure (moduleName, dep)
+
+modulePersistentSrcDeps :: Hir.ModuleText -> ModuleInfo -> Maybe (Text, [Text])
+modulePersistentSrcDeps moduleName info =
+  case (moduleHasPersistentModels moduleName, info.sourceFile, info.persistentModels) of
+    (True, Just filePath, models@(_ : _)) ->
+      Just (filePath, map addModelSuffix models)
+    _ -> Nothing
+
+moduleHasPersistentModels :: Hir.ModuleText -> Bool
+moduleHasPersistentModels moduleName =
+  any (== "PersistentModels") (NE.toList moduleName.parts)
+
+addModelSuffix :: Text -> Text
+addModelSuffix model = persistentModelsRoot <> "/" <> suffixed
+ where
+  suffixed
+    | ".persistentmodels" `T.isSuffixOf` model = model
+    | otherwise = model <> ".persistentmodels"
+
 buildGraphNodes :: BuildState -> HashMap TargetKey (Set TargetKey) -> [(TargetKey, TargetKey, [TargetKey])]
 buildGraphNodes state deps =
   [ (key, key, Set.toList (HM.lookupDefault Set.empty key deps))
@@ -935,7 +975,10 @@ finalizeGraph state =
           , dir = targetState.dir
           , modules = targetState.modules
           , dependsOn = HM.lookupDefault Set.empty targetState.key moduleDeps
+          , persistentSrcDeps = persistentEntries targetState
           }
+      persistentEntries targetState =
+        modulePersistentEntries state.moduleInfos targetState.modules
       targets = HM.map materialize state.targets
       generatedAssignments = AssignedTarget <$> state.moduleToTarget
       preassignedAssignments = PreassignedTarget <$> state.preassignedTargets
@@ -972,6 +1015,7 @@ moduleTargetsFromInfos rootInfo rootTargetDir buckDirs hasOverrideMap moduleInfo
   mkTarget (moduleName, info, dir) =
     let key = ModuleTargetOutput (moduleName.text)
         slug = moduleTargetSlug (moduleTextToText moduleName)
+        srcDeps = maybe [] pure (modulePersistentSrcDeps moduleName info)
      in TargetOutput
           { key = key
           , targetName = slug
@@ -979,6 +1023,7 @@ moduleTargetsFromInfos rootInfo rootTargetDir buckDirs hasOverrideMap moduleInfo
           , directory = dirNameToText dir
           , modules = [moduleTextToText moduleName]
           , dependsOn = map moduleTextToText (Set.toList (moduleDependencies info))
+          , srcDeps = srcDeps
           }
 
   moduleDependencies :: ModuleInfo -> Set Hir.ModuleText
@@ -1032,6 +1077,7 @@ graphToOutput graph =
             _ ->
               let base = targetNameFromKeyOutput keyOut
                in (base, base)
+        srcDeps = map snd target.persistentSrcDeps
      in TargetOutput
           { key = keyOut
           , targetName = shortName
@@ -1039,6 +1085,7 @@ graphToOutput graph =
           , directory = dirNameToText target.dir
           , modules = map qualifiedModuleName (Set.toList target.modules)
           , dependsOn = map qualifiedModuleName (Set.toList target.dependsOn)
+          , srcDeps = srcDeps
           }
 
   moduleTargetNames :: Hir.ModuleText -> DirName -> (Text, Text)

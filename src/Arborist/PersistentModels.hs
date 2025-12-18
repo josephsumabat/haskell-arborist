@@ -2,6 +2,7 @@ module Arborist.PersistentModels (
   persistentModelFromDecl,
   requiredModelFiles,
   persistentModelImportModules,
+  persistentModelsRoot,
 ) where
 
 import AST (DynNode)
@@ -39,6 +40,9 @@ requiredModelFiles program
 
 persistentModelImportModules :: [Text]
 persistentModelImportModules = ["PersistentModels.Import"]
+
+persistentModelsRoot :: Text
+persistentModelsRoot = "config/modelsFiles"
 
 importsPersistentModelHelpers :: Program HirRead -> Bool
 importsPersistentModelHelpers program =
