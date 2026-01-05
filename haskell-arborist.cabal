@@ -87,6 +87,7 @@ library
       Scripts.DirCycles
       Scripts.DumpRenamedAst
       Scripts.ModuleFiles
+      Scripts.PrintDeps
       Scripts.RequiredTargetFiles
   other-modules:
       BuildGraph.Directory.TH

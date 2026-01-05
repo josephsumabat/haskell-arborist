@@ -22,6 +22,7 @@ import Options.Applicative qualified as Opt
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
 import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
 import Scripts.ModuleFiles (ModuleFilesOptions (..), runModuleFiles)
+import Scripts.PrintDeps (PrintDepsOptions (..), runPrintDeps)
 import Scripts.RequiredTargetFiles (RequiredTargetFilesOptions (..), runRequiredTargetFiles)
 import System.Exit (die)
 import System.IO (hPutStrLn, stderr)
@@ -39,6 +40,7 @@ data Command
   | GroupCandidates GroupCandidatesOptions
   | ModuleFiles ModuleFilesOptions
   | RequiredTargetFiles RequiredTargetFilesOptions
+  | PrintDeps PrintDepsOptions
 
 data DumpTargetGraphOptions = DumpTargetGraphOptions
   { srcRootDir :: FilePath
@@ -73,6 +75,7 @@ runCommand cmd = case cmd of
   GroupCandidates opts -> runGroupCandidates opts
   ModuleFiles opts -> runModuleFiles opts
   RequiredTargetFiles opts -> runRequiredTargetFiles opts
+  PrintDeps opts -> runPrintDeps opts
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -120,6 +123,12 @@ commandParser =
         ( Opt.info
             (RequiredTargetFiles <$> requiredTargetFilesOptionsParser)
             (Opt.progDesc "List unique source files directly imported by the provided modules")
+        )
+      <> Opt.command
+        "print-deps"
+        ( Opt.info
+            (PrintDeps <$> printDepsOptionsParser)
+            (Opt.progDesc "Print the modules imported by a Haskell source file")
         )
       <> Opt.metavar "COMMAND"
  where
@@ -221,6 +230,14 @@ commandParser =
                     )
                 )
           )
+
+  printDepsOptionsParser :: Parser PrintDepsOptions
+  printDepsOptionsParser =
+    PrintDepsOptions
+      <$> Opt.strArgument
+        ( Opt.metavar "FILE"
+            <> Opt.help "Path to the Haskell source file to analyze"
+        )
 
   groupCandidatesOptionsParser :: Parser GroupCandidatesOptions
   groupCandidatesOptionsParser =
