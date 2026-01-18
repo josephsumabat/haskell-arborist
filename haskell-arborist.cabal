@@ -74,6 +74,7 @@ library
       Diagnostics
       Diagnostics.Fixes
       Diagnostics.ParseGHC
+      DynNode.Snapshot
       FileWith
       HaskellAnalyzer
       Hir
