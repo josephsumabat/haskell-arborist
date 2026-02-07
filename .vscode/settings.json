@@ -1,0 +1,5 @@
+{
+    "haskell.serverExecutablePath": "",
+    "haskell.manageHLS": "GHCup",
+    "haskell.formattingProvider": "fourmolu"
+}

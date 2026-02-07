@@ -1,0 +1,56 @@
+module Arborist.Files where
+
+import Control.Monad (filterM, forM, join)
+import Data.HashMap.Lazy qualified as Map
+import Data.Maybe
+import Hir.Types qualified as Hir
+import ModUtils
+import System.Directory (doesDirectoryExist, listDirectory, makeAbsolute)
+import System.Directory.Extra
+import System.FilePath (takeExtension, (</>))
+
+type ModFileMap = Map.HashMap Hir.ModuleText FilePath
+
+-- | Build a map from ModuleText to FilePath for all .hs files under the given baseDirs.
+buildModuleFileMap ::
+  [FilePath] -> -- base directories
+  IO (Map.HashMap Hir.ModuleText FilePath)
+buildModuleFileMap baseDirs = do
+  absBaseDirs <- mapM makeAbsolute baseDirs
+  filePairsPerDir <- forM absBaseDirs $ \baseDirAbs -> do
+    exists <- doesDirectoryExist baseDirAbs
+    if exists
+      then do
+        hsFiles <- getAllHsFiles [baseDirAbs]
+        validPairs <- forM hsFiles $ \fileAbs -> do
+          case unsafePathToModule [baseDirAbs] fileAbs of
+            Just modText -> pure (Just (modText, fileAbs))
+            Nothing -> pure Nothing
+        pure (catMaybes validPairs)
+      else pure []
+  let allFilePairs = concat filePairsPerDir
+  pure (Map.fromList allFilePairs)
+
+getAllHsFiles :: [FilePath] -> IO [FilePath]
+getAllHsFiles dirs = do
+  join
+    <$> ( forM dirs $ \dir -> do
+            exists <- doesDirectoryExist dir
+            if exists
+              then getHsFiles dir
+              else pure []
+        )
+
+-- | Get all .hs files recursively from a given directory
+-- Note: does not follow symbolic links beyond the initial level for
+-- optimization purposes
+getHsFiles :: FilePath -> IO [FilePath]
+getHsFiles dir = do
+  contents <- listDirectory dir
+  let paths = map (dir </>) contents
+  dirs <- filterM doesDirectoryExist paths
+  -- Don't follow symbolic links beyond the first level
+  dirs' <- filterM ((fmap not) . pathIsSymbolicLink) dirs
+  let files = filter (\f -> takeExtension f == ".hs") paths
+  subFiles <- fmap concat $ forM dirs' getHsFiles
+  return (files ++ subFiles)

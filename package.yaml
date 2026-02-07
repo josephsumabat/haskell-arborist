@@ -1,0 +1,131 @@
+spec-version: 0.30.0
+name: haskell-arborist
+author: Joseph Sumabat
+synopsis: See README on Github for more information 
+description: A personal template for haskell projects
+category: Development
+maintainer: josephrsumabat@gmail.com
+github: josephsumabat/haskell-arborist
+license: MIT
+version: 0.1.0
+build-type: Simple
+language: GHC2021
+extra-source-files:
+  - CHANGELOG.md
+  - README.md
+
+dependencies:
+  - aeson
+  - base
+  - bytestring
+  - containers >= 0.6.0 && < 0.8
+  - criterion
+  - deepseq
+  - directory
+  - errors
+  - exceptions
+  - extra
+  - filepath
+  - mtl
+  - hashable
+  - haskell-ast
+  - lens
+  - optics
+  - pretty-simple
+  - text
+  - text-range
+  - text-rope >= 0.3 && < 0.4
+  - tree-sitter-ast
+  - tree-sitter-haskell
+  - tree-sitter-simple
+  - unliftio
+  - time
+  - nonempty-containers
+  - unordered-containers >= 0.2 && < 0.3
+  - safe
+  - regex-tdfa
+  - raw-strings-qq
+
+default-extensions:
+  - BangPatterns
+  - DataKinds
+  - DeriveGeneric
+  - DuplicateRecordFields
+  - EmptyCase
+  - FlexibleContexts
+  - ImportQualifiedPost
+  - LambdaCase
+  - NamedFieldPuns
+  - NoFieldSelectors
+  - OverloadedRecordDot
+  - OverloadedStrings
+  - PatternSynonyms
+  - RankNTypes
+  - ScopedTypeVariables
+  - TupleSections
+  - TypeApplications
+  - TypeOperators
+  - ViewPatterns
+
+ghc-options:
+  - -Wall
+  - -Wno-name-shadowing
+  - -Wincomplete-record-updates
+
+library:
+  source-dirs: src
+  ghc-options:
+    - -fwrite-ide-info
+    - -hiedir test/TestData/.hiefiles
+
+executable:
+  source-dirs: app
+  main: Main.hs
+  dependencies:
+    - haskell-arborist
+    - optparse-applicative
+
+tests:
+  haskell-arborist-test:
+    dependencies:
+      - haskell-arborist
+      - hspec-golden
+    defaults: hspec/hspec@main
+    ghc-options:
+      - -fwrite-ide-info
+      - -hiedir test/TestData/.hiefiles
+
+flags:
+  dev:
+    description: Defer type errors for development
+    manual: true
+    default: false
+  par:
+    description: Run with parallelism
+    manual: true
+    default: false
+
+when:
+  # Enable TypeAbstractions only on GHC >= 9.6, and provide a CPP macro.
+  - condition: impl(ghc >= 9.8.1)
+    default-extensions:
+      - TypeAbstractions
+    cpp-options:
+      - -DHAS_TYPEABSTRACTIONS
+
+  # Older GHCs: provide a negative macro if you want to guard code paths.
+  - condition: impl(ghc < 9.8.1)
+    cpp-options:
+      - -DNO_TYPEABSTRACTIONS
+
+  - condition: flag(dev)
+    ghc-options:
+      - -fwrite-ide-info
+      - -hiedir .hiefiles
+      - -fdefer-type-errors
+      - -fno-defer-typed-holes
+      - -Werror=deferred-type-errors
+      - -Werror=deferred-out-of-scope-variables
+
+  - condition: flag(par)
+    ghc-options: -O2 -threaded -rtsopts

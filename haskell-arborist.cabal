@@ -1,0 +1,313 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.37.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           haskell-arborist
+version:        0.1.0
+synopsis:       See README on Github for more information
+description:    A personal template for haskell projects
+category:       Development
+homepage:       https://github.com/josephsumabat/haskell-arborist#readme
+bug-reports:    https://github.com/josephsumabat/haskell-arborist/issues
+author:         Joseph Sumabat
+maintainer:     josephrsumabat@gmail.com
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    CHANGELOG.md
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/josephsumabat/haskell-arborist
+
+flag dev
+  description: Defer type errors for development
+  manual: True
+  default: False
+
+flag par
+  description: Run with parallelism
+  manual: True
+  default: False
+
+library
+  exposed-modules:
+      Arborist.AutoExport
+      Arborist.AutoImport
+      Arborist.AutoQualify
+      Arborist.Config
+      Arborist.Debug
+      Arborist.Debug.Trace
+      Arborist.DocIndex
+      Arborist.Exports
+      Arborist.Files
+      Arborist.GlobImports
+      Arborist.Haddock
+      Arborist.ModExports
+      Arborist.ModuleInfo
+      Arborist.PersistentModels
+      Arborist.ProgramIndex
+      Arborist.Reexports
+      Arborist.Refactor.Module
+      Arborist.Renamer
+      Arborist.Renamer.GlobalEnv
+      Arborist.Rewrite
+      Arborist.Rewrite.Apply
+      Arborist.Rewrite.Core
+      Arborist.Scope
+      Arborist.Scope.Global
+      Arborist.Scope.Local
+      Arborist.Scope.Types
+      Arborist.TreeSitter
+      Data.Change
+      Data.Edit
+      Data.Path
+      Data.Rope
+      Data.SourceEdit
+      Diagnostics
+      Diagnostics.Fixes
+      Diagnostics.ParseGHC
+      DynNode.Snapshot
+      FileWith
+      HaskellAnalyzer
+      Hir
+      Hir.Parse
+      Hir.Print
+      Hir.Read.Types
+      Hir.Render.Import
+      Hir.Types
+      Hir.Write.Types
+      ModUtils
+      Scripts.DirCycles
+      Scripts.DumpRenamedAst
+      Scripts.ModuleFiles
+      Scripts.PrintDeps
+      Scripts.RequiredTargetFiles
+  other-modules:
+      Paths_haskell_arborist
+  hs-source-dirs:
+      src
+  default-extensions:
+      BangPatterns
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
+      OverloadedRecordDot
+      OverloadedStrings
+      PatternSynonyms
+      RankNTypes
+      ScopedTypeVariables
+      TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
+  ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
+    , directory
+    , errors
+    , exceptions
+    , extra
+    , filepath
+    , hashable
+    , haskell-ast
+    , lens
+    , mtl
+    , nonempty-containers
+    , optics
+    , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
+    , safe
+    , text
+    , text-range
+    , text-rope ==0.3.*
+    , time
+    , tree-sitter-ast
+    , tree-sitter-haskell
+    , tree-sitter-simple
+    , unliftio
+    , unordered-containers ==0.2.*
+  default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
+  if flag(dev)
+    ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
+
+executable haskell-arborist
+  main-is: Main.hs
+  other-modules:
+      Paths_haskell_arborist
+  hs-source-dirs:
+      app
+  default-extensions:
+      BangPatterns
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
+      OverloadedRecordDot
+      OverloadedStrings
+      PatternSynonyms
+      RankNTypes
+      ScopedTypeVariables
+      TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
+  ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
+    , directory
+    , errors
+    , exceptions
+    , extra
+    , filepath
+    , hashable
+    , haskell-arborist
+    , haskell-ast
+    , lens
+    , mtl
+    , nonempty-containers
+    , optics
+    , optparse-applicative
+    , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
+    , safe
+    , text
+    , text-range
+    , text-rope ==0.3.*
+    , time
+    , tree-sitter-ast
+    , tree-sitter-haskell
+    , tree-sitter-simple
+    , unliftio
+    , unordered-containers ==0.2.*
+  default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
+  if flag(dev)
+    ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
+
+test-suite haskell-arborist-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Arborist.AutoExportSpec
+      Arborist.AutoImportSpec
+      Arborist.AutoQualifySpec
+      Arborist.FilesSpec
+      Arborist.HirSpec
+      Arborist.PersistentModelsSpec
+      Arborist.ProgramIndexSpec
+      Arborist.Refactor.ModuleSpec
+      Arborist.TransitiveReexportSpec
+      TestImport
+      Paths_haskell_arborist
+  hs-source-dirs:
+      test
+  default-extensions:
+      BangPatterns
+      DataKinds
+      DeriveGeneric
+      DuplicateRecordFields
+      EmptyCase
+      FlexibleContexts
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
+      OverloadedRecordDot
+      OverloadedStrings
+      PatternSynonyms
+      RankNTypes
+      ScopedTypeVariables
+      TupleSections
+      TypeApplications
+      TypeOperators
+      ViewPatterns
+  ghc-options: -Wall -Wno-name-shadowing -Wincomplete-record-updates -fwrite-ide-info -hiedir test/TestData/.hiefiles
+  build-depends:
+      aeson
+    , base
+    , bytestring
+    , containers >=0.6.0 && <0.8
+    , criterion
+    , deepseq
+    , directory
+    , errors
+    , exceptions
+    , extra
+    , filepath
+    , hashable
+    , haskell-arborist
+    , haskell-ast
+    , hspec ==2.*
+    , hspec-golden
+    , lens
+    , mtl
+    , nonempty-containers
+    , optics
+    , pretty-simple
+    , raw-strings-qq
+    , regex-tdfa
+    , safe
+    , text
+    , text-range
+    , text-rope ==0.3.*
+    , time
+    , tree-sitter-ast
+    , tree-sitter-haskell
+    , tree-sitter-simple
+    , unliftio
+    , unordered-containers ==0.2.*
+  default-language: GHC2021
+  if impl(ghc >= 9.8.1)
+    default-extensions:
+        TypeAbstractions
+    cpp-options: -DHAS_TYPEABSTRACTIONS
+  if impl(ghc < 9.8.1)
+    cpp-options: -DNO_TYPEABSTRACTIONS
+  if flag(dev)
+    ghc-options: -fwrite-ide-info -hiedir .hiefiles -fdefer-type-errors -fno-defer-typed-holes -Werror=deferred-type-errors -Werror=deferred-out-of-scope-variables
+  if flag(par)
+    ghc-options: -O2 -threaded -rtsopts
+  build-tool-depends: hspec-discover:hspec-discover == 2.*
