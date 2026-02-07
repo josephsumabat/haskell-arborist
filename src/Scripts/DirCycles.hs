@@ -224,8 +224,8 @@ buildDirectoryCyclesContext sourceDirs = do
 runDetectCycles :: IO ()
 runDetectCycles = do
   -- Only print sample module paths between two targets
-  let srcDirs = ["../mercury-web-backend/src"]
-      dirA = "Mercury/Authorization"
+  let srcDirs = ["../path-to-project/src"]
+      dirA = "Example/Authorization"
       dirB = "PersistentModels"
   (mg, _dg) <- buildDirectoryCyclesContext srcDirs
   let maxDepth = 6
@@ -250,11 +250,11 @@ runRenameModule :: IO ()
 runRenameModule = do
   -- Adjust this list of (fromModule, toModule) tuples
   let moduleRenames =
-        [ ("Mercury.BusinessBanking.Onboarding.OnboarderAttribute", "Mercury.BusinessBanking.Onboarding.Core.OnboarderAttribute")
+        [ ("Example.FileDownloadLink", "Example.File.FileDownloadLink")
         ]
 
   -- Discover modules under these source roots
-  let sourceRoots = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
+  let sourceRoots = ["../path-to-project/src", "../path-to-project/test"]
 
   -- Build a ProgramIndex sufficient for renameModule
   modFileMap <- buildModuleFileMap sourceRoots
@@ -283,18 +283,18 @@ runRenameModule = do
 runPruneEdges :: IO ()
 runPruneEdges = do
   -- Local variables
-  let sourceRoots = ["../mercury-web-backend/src"]
-      targetDir = "Mercury/FakeData" -- directory to pick the last module from
+  let sourceRoots = ["../path-to-project/src"]
+      targetDir = "Example/FakeData" -- directory to pick the last module from
       newDir = "My.New.Module" -- new module prefix
 
       -- A sample path like:
-      -- Mercury.FakeData.Populate.IntraMercuryTransfers
-      --   -> Mercury.FakeData.Populate.MercuryAccount
-      --   -> Mercury.FakeData.Constants
+      -- Example.FakeData.Populate.IntraTransfers
+      --   -> Example.FakeData.Populate.CustomerAccount
+      --   -> Example.FakeData.Constants
       pathModules =
-        [ parseModuleTextFromText "Mercury.FakeData.Populate.IntraMercuryTransfers"
-        , parseModuleTextFromText "Mercury.FakeData.Populate.MercuryAccount"
-        , parseModuleTextFromText "Mercury.FakeData.Constants"
+        [ parseModuleTextFromText "Example.FakeData.Populate.IntraTransfers"
+        , parseModuleTextFromText "Example.FakeData.Populate.CustomerAccount"
+        , parseModuleTextFromText "Example.FakeData.Constants"
         ]
       pathView = ModulePathView pathModules
 
@@ -304,7 +304,7 @@ runPruneEdges = do
 -- | Given a discovered module path, choose the last module that resides
 -- in the provided target directory, and rename it into a new module
 -- prefix while preserving its leaf name. For example, if the path ends
--- with `Mercury.FakeData.Constants` and targetDir is `Mercury/FakeData`,
+-- with `Example.FakeData.Constants` and targetDir is `Example/FakeData`,
 -- and newDir is `My.New.Module`, this will rename it to
 -- `My.New.Module.Constants`.
 --
@@ -365,8 +365,8 @@ pruneEdges sourceRoots (ModulePathView mods) targetDir newDir = do
 -- This function finds all modules in the program index that start with the old prefix
 -- and renames them to use the new prefix instead, preserving the suffix.
 --
--- For example, if oldPrefix is "Mercury.FakeData" and newPrefix is "My.New.Module",
--- then "Mercury.FakeData.Core" becomes "My.New.Module.Core"
+-- For example, if oldPrefix is "Example.FakeData" and newPrefix is "My.New.Module",
+-- then "Example.FakeData.Core" becomes "My.New.Module.Core"
 --
 -- This returns a SourceEdit; the caller may apply it with applySourceEdit.
 renameModulePrefix :: ProgramIndex -> ModFileMap -> FilePath -> FilePath -> String -> String -> SourceEdit
@@ -417,12 +417,12 @@ renameModulePrefix prgIndex modMap oldBaseAbs newBaseAbs oldPrefix newPrefix =
 --
 -- Local variables to adjust:
 --   - sourceRoots: list of source directories to scan
---   - oldPrefix: the prefix to match (e.g., "Mercury.FakeData")
+--   - oldPrefix: the prefix to match (e.g., "Example.FakeData")
 --   - newPrefix: the new prefix to use (e.g., "My.New.Module")
 runRenameModulePrefix :: IO ()
 runRenameModulePrefix = do
   -- Adjust these local variables
-  let sourceRoots = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
+  let sourceRoots = ["../path-to-project/src", "../path-to-project/test"]
       oldPrefix = "Mobile.TwoFactorAuth.AuthCode"
       newPrefix = "Mobile.TwoFactorAuth.Core.AuthCode"
 

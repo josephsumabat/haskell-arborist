@@ -33,7 +33,8 @@ import Hir.Read.Types qualified as Hir.Read
 import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
 import Hir.Write.Types qualified as Hir.Write
-import System.FilePath ((</>))
+import System.Directory qualified as Dir
+import System.FilePath qualified as FP
 
 -- local helpers copied from Diagnostics.ParseGHC
 readInt :: T.Text -> Maybe Int
@@ -44,12 +45,49 @@ readInt t = case T.Read.decimal t of
 dec :: Int -> Int
 dec x = max 0 (x - 1)
 
-fixRedundantImports :: IO (Map.HashMap Path.AbsPath [Edit])
-fixRedundantImports = do
-  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
-  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
-  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
-  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+data DiagnosticsEnvironment = DiagnosticsEnvironment
+  { diagProjectRoot :: FilePath
+  , diagGhcidPath :: FilePath
+  , diagMainFile :: FilePath
+  }
+  deriving (Show, Eq)
+
+normalizeDiagnosticsEnv :: DiagnosticsEnvironment -> IO DiagnosticsEnvironment
+normalizeDiagnosticsEnv env = do
+  absRoot <- Dir.makeAbsolute env.diagProjectRoot
+  pure env {diagProjectRoot = absRoot}
+
+resolveWithinRoot :: DiagnosticsEnvironment -> FilePath -> FilePath
+resolveWithinRoot DiagnosticsEnvironment {diagProjectRoot} candidate
+  | FP.isAbsolute candidate = candidate
+  | otherwise = diagProjectRoot FP.</> candidate
+
+ghcidLogPath :: DiagnosticsEnvironment -> FilePath
+ghcidLogPath env = resolveWithinRoot env env.diagGhcidPath
+
+mainFileRelPath :: DiagnosticsEnvironment -> Path.RelPath
+mainFileRelPath env =
+  let absMain = resolveWithinRoot env env.diagMainFile
+      relPath = FP.makeRelative env.diagProjectRoot absMain
+   in Path.filePathToRel relPath
+
+diagnosticToAbs :: DiagnosticsEnvironment -> Path.RelPath -> Path.AbsPath
+diagnosticToAbs env relPath =
+  let relFile = Path.toFilePath relPath
+   in Path.unsafeFilePathToAbs (env.diagProjectRoot FP.</> relFile)
+
+loadDiagnostics :: DiagnosticsEnvironment -> IO [Diagnostic]
+loadDiagnostics env = do
+  info <- catch @IOException (TextIO.readFile (ghcidLogPath env)) (const $ pure "")
+  let mainFile = mainFileRelPath env
+  pure $ Diagnostics.parse (diagnosticToAbs env) mainFile info
+
+fixRedundantImports :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixRedundantImports env = normalizeDiagnosticsEnv env >>= fixRedundantImportsWithEnv
+
+fixRedundantImportsWithEnv :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixRedundantImportsWithEnv env = do
+  diagnostics <- loadDiagnostics env
   putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
   -- Debug: print all diagnostic messages
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
@@ -82,12 +120,12 @@ fixRedundantImports = do
       Nothing ->
         pure acc
 
-fixNotInScope :: IO (Map.HashMap Path.AbsPath [Edit])
-fixNotInScope = do
-  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
-  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
-  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
-  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+fixNotInScope :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixNotInScope env = normalizeDiagnosticsEnv env >>= fixNotInScopeWithEnv
+
+fixNotInScopeWithEnv :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixNotInScopeWithEnv env = do
+  diagnostics <- loadDiagnostics env
   putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
   -- Debug: print all diagnostic messages
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
@@ -165,12 +203,12 @@ fixNotInScope = do
             let existingEdits = Map.findWithDefault [] filePath acc
             pure $ Map.insert filePath (insertionEdit : existingEdits) acc
 
-fixNotExported :: IO (Map.HashMap Path.AbsPath [Edit])
-fixNotExported = do
-  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
-  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
-  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
-  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+fixNotExported :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixNotExported env = normalizeDiagnosticsEnv env >>= fixNotExportedWithEnv
+
+fixNotExportedWithEnv :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixNotExportedWithEnv env = do
+  diagnostics <- loadDiagnostics env
   putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
   -- Debug: print all diagnostic messages
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
@@ -277,12 +315,11 @@ hideSymbolInImport wimp sym =
            in Hir.Import {mod = wimp.mod, alias = wimp.alias, qualified = wimp.qualified, hiding = False, importList = Just items', dynNode = ()}
 
 -- | Construct a rewrite edit that hides the ambiguous symbol on the selected import (by index)
-mkAmbiguousImportHidingEdit :: Int -> Diagnostic -> IO (Maybe (FilePath, Range, Edit))
-mkAmbiguousImportHidingEdit whichIdx diagnostic = do
-  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
+mkAmbiguousImportHidingEdit :: DiagnosticsEnvironment -> Int -> Diagnostic -> IO (Maybe (FilePath, Range, Edit))
+mkAmbiguousImportHidingEdit env whichIdx diagnostic = do
   case (parseImportedFromAtIndex whichIdx diagnostic.message, parseAmbiguousSymbol diagnostic.message) of
     (Just (relFile, lineColRange), Just sym) -> do
-      let absFilePath = root System.FilePath.</> relFile
+      let absFilePath = resolveWithinRoot env relFile
       fileContent <- TextIO.readFile absFilePath
       let rope = Rope.fromText fileContent
           targetRange = Rope.lineColRangeToRange rope lineColRange
@@ -302,28 +339,28 @@ mkAmbiguousImportHidingEdit whichIdx diagnostic = do
     _ -> pure Nothing
 
 -- | Fix ambiguous occurrence diagnostics by adding hiding to the second import
-fixAmbiguousImports :: IO (Map.HashMap Path.AbsPath [Edit])
-fixAmbiguousImports = do
-  info <- catch @IOException (TextIO.readFile "/home/josephsumabat/Documents/workspace/mercury-web-backend/ghcid.txt") (const $ pure "")
-  let mainFile = "/home/josephsumabat/Documents/workspace/mercury-web-backend/app/main.hs"
-  let root = "/home/josephsumabat/Documents/workspace/mercury-web-backend"
-  let diagnostics = Diagnostics.parse (Path.unsafeFilePathToAbs . (root System.FilePath.</>) . Path.toFilePath) mainFile info
+fixAmbiguousImports :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixAmbiguousImports env = normalizeDiagnosticsEnv env >>= fixAmbiguousImportsWithEnv
+
+fixAmbiguousImportsWithEnv :: DiagnosticsEnvironment -> IO (Map.HashMap Path.AbsPath [Edit])
+fixAmbiguousImportsWithEnv env = do
+  diagnostics <- loadDiagnostics env
   putStrLn $ "Total diagnostics found: " ++ show (length diagnostics)
   forM_ diagnostics $ \d -> putStrLn $ "Diagnostic: " ++ T.unpack d.message
   let relevantDiagnostics = filter isAmbiguousImportDiagnostic diagnostics
   putStrLn $ "Found " ++ show (length relevantDiagnostics) ++ " ambiguous import diagnostics"
   let hideSecond = False -- set to False to hide the first import instead
       whichIdx = if hideSecond then 1 else 0
-  triplesMap <- foldM (collectTriple whichIdx) Map.empty relevantDiagnostics
+  triplesMap <- foldM (collectTriple env whichIdx) Map.empty relevantDiagnostics
   let editsMap = fmap (map snd) triplesMap
   putStrLn $ "Total files with edits (ambiguous): " ++ show (Map.size editsMap)
   forM_ (Map.toList editsMap) $ \(filePath, edits) -> do
     putStrLn $ "Collected " ++ show (length edits) ++ " ambiguous edits for " ++ Path.toFilePath filePath
   pure editsMap
  where
-  collectTriple :: Int -> Map.HashMap Path.AbsPath [(Range, Edit)] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [(Range, Edit)])
-  collectTriple whichIdx acc diagnostic = do
-    maybeInfo <- mkAmbiguousImportHidingEdit whichIdx diagnostic
+  collectTriple :: DiagnosticsEnvironment -> Int -> Map.HashMap Path.AbsPath [(Range, Edit)] -> Diagnostic -> IO (Map.HashMap Path.AbsPath [(Range, Edit)])
+  collectTriple env' whichIdx acc diagnostic = do
+    maybeInfo <- mkAmbiguousImportHidingEdit env' whichIdx diagnostic
     case maybeInfo of
       Just (filePath, rng, edit) -> do
         let absPath = Path.unsafeFilePathToAbs filePath
@@ -349,10 +386,11 @@ combineFixMaps :: Map.HashMap Path.AbsPath [Edit] -> Map.HashMap Path.AbsPath [E
 combineFixMaps = Map.unionWith (++)
 
 -- | Run only the simple fixes that don't require extra configuration.
-runSimpleFixes :: IO ()
-runSimpleFixes = do
-  redundantFixes <- fixRedundantImports
-  notExportedFixes <- fixNotExported
+runSimpleFixes :: DiagnosticsEnvironment -> IO ()
+runSimpleFixes env = do
+  normalized <- normalizeDiagnosticsEnv env
+  redundantFixes <- fixRedundantImportsWithEnv normalized
+  notExportedFixes <- fixNotExportedWithEnv normalized
 
   let simpleFixes = redundantFixes `combineFixMaps` notExportedFixes
 
@@ -360,12 +398,13 @@ runSimpleFixes = do
   applyFixes simpleFixes
 
 -- | Run all fixes and apply them
-runAllFixes :: IO ()
-runAllFixes = do
-  redundantFixes <- fixRedundantImports
-  notInScopeFixes <- fixNotInScope
-  notExportedFixes <- fixNotExported
-  ambiguousFixes <- fixAmbiguousImports
+runAllFixes :: DiagnosticsEnvironment -> IO ()
+runAllFixes env = do
+  normalized <- normalizeDiagnosticsEnv env
+  redundantFixes <- fixRedundantImportsWithEnv normalized
+  notInScopeFixes <- fixNotInScopeWithEnv normalized
+  notExportedFixes <- fixNotExportedWithEnv normalized
+  ambiguousFixes <- fixAmbiguousImportsWithEnv normalized
 
   -- Combine all fixes
   let allFixes =

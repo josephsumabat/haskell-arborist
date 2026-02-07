@@ -1,5 +1,6 @@
 packages:
     ./haskell-arborist.cabal
+    ./haskell-bullseye/haskell-bullseye.cabal
 --    ../tree-sitter-simple/tree-sitter-simple
 --    ../tree-sitter-simple/tree-sitter-haskell
 --    ../tree-sitter-simple/tree-sitter-ast

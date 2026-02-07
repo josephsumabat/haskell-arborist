@@ -7,6 +7,7 @@ module Arborist.Reexports (
 
 import AST qualified
 import AST.Haskell qualified as H
+import Arborist.Config (allSourceRoots, loadArboristConfig)
 import Arborist.Files
 import Arborist.ProgramIndex
 import Arborist.Refactor.Module (findImportingModules)
@@ -16,6 +17,7 @@ import Arborist.Scope.Global
 import Arborist.Scope.Types
 import Control.Monad
 import Data.ByteString qualified as BS
+import Data.Char (toLower)
 import Data.Edit (Edit, delete)
 import Data.HashMap.Lazy qualified as Map
 import Data.Maybe (fromJust, isJust, mapMaybe)
@@ -31,7 +33,21 @@ import Hir.Read.Types qualified as Hir.Read
 import Hir.Render.Import qualified as Render
 import Hir.Types qualified as Hir
 import Hir.Write.Types qualified as Hir.Write
+import System.FilePath (takeFileName)
 import Text.Pretty.Simple
+
+getConfiguredSourceRoots :: IO [FilePath]
+getConfiguredSourceRoots = do
+  config <- loadArboristConfig Nothing
+  pure (allSourceRoots config)
+
+pickTestRoots :: [FilePath] -> [FilePath]
+pickTestRoots roots =
+  let looksLikeTest dir =
+        let base = map toLower (takeFileName dir)
+         in base `elem` ["test", "tests"]
+      testRoots = filter looksLikeTest roots
+   in if null testRoots then roots else testRoots
 
 -- | Find all modules in the program index that import the given module.
 --
@@ -61,7 +77,7 @@ runReplaceReexports = do
               , "TestImport.Assertion"
               ]
 
-  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test"]
+  onlySrc <- getConfiguredSourceRoots
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc
@@ -146,7 +162,7 @@ createEmptyHidingImportEdits program =
 
 runDeleteEmptyHidingImports :: IO ()
 runDeleteEmptyHidingImports = do
-  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test", "../mercury-web-backend/local-packages/a-mercury-prelude/src"]
+  onlySrc <- getConfiguredSourceRoots
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc
@@ -187,7 +203,7 @@ createMercuryPreludeConflictEdits program =
 
 runRemoveMercuryPreludeWhenTestPreludePresent :: IO ()
 runRemoveMercuryPreludeWhenTestPreludePresent = do
-  let onlySrc = ["../mercury-web-backend/src", "../mercury-web-backend/test", "../mercury-web-backend/local-packages/a-mercury-prelude/src"]
+  onlySrc <- getConfiguredSourceRoots
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc
@@ -218,7 +234,8 @@ createEmptyImportEdits program =
 
 runDeleteEmptyImports :: IO ()
 runDeleteEmptyImports = do
-  let onlySrc = ["../mercury-web-backend/test"]
+  configured <- getConfiguredSourceRoots
+  let onlySrc = pickTestRoots configured
   srcFiles <- getAllHsFiles onlySrc
   srcPrgs <- lazyGetPrgs srcFiles
   modFileMap <- buildModuleFileMap onlySrc

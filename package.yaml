@@ -26,6 +26,7 @@ dependencies:
   - exceptions
   - extra
   - filepath
+  - mtl
   - hashable
   - haskell-ast
   - lens
@@ -73,8 +74,6 @@ ghc-options:
 
 library:
   source-dirs: src
-  other-modules:
-    - BuildGraph.Directory.TH
   ghc-options:
     - -fwrite-ide-info
     - -hiedir test/TestData/.hiefiles
