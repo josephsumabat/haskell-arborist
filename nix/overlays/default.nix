@@ -1,9 +1,9 @@
 # Keep this up to date with cabal.project
 let
   tree-sitter-simple-repo = {
-    url = "https://github.com/josephsumabat/tree-sitter-simple";
-    sha256 = "sha256-ijI9t56Mzxo+b7Y5HY3TM/LsMxnPyyokrGBCABFaFQo=";
-    rev = "1d280ff9335f3e53a9accebb66c92e6a3ca389b1";
+    url = "https://github.com/tfausak/tree-sitter-simple";
+    sha256 = "sha256-AKi63Trf9FCDu7QOfRBinuEKYefF/p4rali4qNdrlnI=";
+    rev = "792959489fd25c2e1dc3e5a3502726aae7c84cee";
     fetchSubmodules = true;
   };
 
