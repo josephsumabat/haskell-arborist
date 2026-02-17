@@ -2,8 +2,8 @@
 let
   tree-sitter-simple-repo = {
     url = "https://github.com/josephsumabat/tree-sitter-simple";
-    sha256 = "sha256-qBQh9JUJqfa7t2hBTkp0+G2zhCIEkL/hxOSjaWWW8TE=";
-    rev = "54d42c4ad7a51b2cded938692a46c2e4a6c12c85";
+    sha256 = "sha256-ijI9t56Mzxo+b7Y5HY3TM/LsMxnPyyokrGBCABFaFQo=";
+    rev = "1d280ff9335f3e53a9accebb66c92e6a3ca389b1";
     fetchSubmodules = true;
   };
 
