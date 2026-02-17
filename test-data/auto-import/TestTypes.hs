@@ -15,8 +15,6 @@ class MyClass a where
 
 newtype MyNewtype = MyNewtype Int
 
-type MyType = Int
-
 data MyData
   = MyDataConstructor Int String
 

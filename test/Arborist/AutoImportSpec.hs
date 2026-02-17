@@ -79,7 +79,7 @@ spec = do
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
-          dataDecl = (getDecls exportProg) !! 3
+          dataDecl = (getDecls exportProg) !! 2
 
       case importNode of
         Just import' -> do
@@ -98,7 +98,7 @@ spec = do
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
-          fooDecl = (getDecls exportProg) !! 4
+          fooDecl = (getDecls exportProg) !! 3
 
       case importNode of
         Just import' -> do
@@ -117,7 +117,7 @@ spec = do
       let [importingProg] = importingPrograms
           [exportProg] = exportPrograms
           importNode = Parse.findNode (AST.cast @H.ImportP) (AST.getDynNode importingProg.node)
-          operatorDecl = (getDecls exportProg) !! 6
+          operatorDecl = (getDecls exportProg) !! 5
 
       case importNode of
         Just import' -> do
