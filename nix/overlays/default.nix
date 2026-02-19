@@ -2,8 +2,8 @@
 let
   tree-sitter-simple-repo = {
     url = "https://github.com/josephsumabat/tree-sitter-simple";
-    sha256 = "sha256-ijI9t56Mzxo+b7Y5HY3TM/LsMxnPyyokrGBCABFaFQo=";
-    rev = "1d280ff9335f3e53a9accebb66c92e6a3ca389b1";
+    sha256 = "sha256-fY777r1TvqS17Gz5Ew2syWO7gYGmXRLaCMzvYWJwWYk=";
+    rev = "a97da04ac45ff4199fe845d1debd56a4a3d4f038";
     fetchSubmodules = true;
   };
 
@@ -18,11 +18,25 @@ in
           sha256 = "sha256-NUuQW59vzpXufNpAq4qwx5R0/2TwgDgtapjDSdIybhQ=";
     };
 
+    # Generate parser.c from grammar.js for tree-sitter-haskell.
+    # The upstream tek/tree-sitter-haskell repo gitignores parser.c since it's
+    # auto-generated, so we must produce it before the Haskell build.
+    tree-sitter-haskell-src = let
+      base = super.fetchgit tree-sitter-simple-repo;
+    in super.runCommand "tree-sitter-haskell-src" {
+      nativeBuildInputs = [ super.nodejs super.tree-sitter ];
+    } ''
+      cp -r ${base}/tree-sitter-haskell $out
+      chmod -R u+w $out
+      cd $out/vendor/tree-sitter-haskell
+      tree-sitter generate --no-bindings
+    '';
+
     haskellPackages = super.haskell.packages.${self.ghcVersion}.override {
       overrides = haskellSelf: haskellSuper: {
         tree-sitter-haskell =
           haskellSuper.callCabal2nix
-          "tree-sitter-haskell" "${(super.fetchgit tree-sitter-simple-repo)}/tree-sitter-haskell" {};
+          "tree-sitter-haskell" self.tree-sitter-haskell-src {};
 
         tree-sitter-simple =
           haskellSuper.callCabal2nix
