@@ -9,8 +9,8 @@ packages:
 
 source-repository-package
     type: git
-    location: https://github.com/tfausak/tree-sitter-simple.git
-    tag: 8dbbdf2d504ebd9a34ca131987d2a288387c9b14
+    location: https://github.com/josephsumabat/tree-sitter-simple.git
+    tag: a97da04ac45ff4199fe845d1debd56a4a3d4f038
     subdir:
       tree-sitter-simple
       tree-sitter-haskell
