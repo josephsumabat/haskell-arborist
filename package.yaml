@@ -77,6 +77,11 @@ library:
   ghc-options:
     - -fwrite-ide-info
     - -hiedir test/TestData/.hiefiles
+  dependencies:
+    - http-types
+    - process
+    - wai
+    - warp
 
 executable:
   source-dirs: app

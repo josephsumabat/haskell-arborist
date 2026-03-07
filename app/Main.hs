@@ -9,6 +9,7 @@ import Options.Applicative qualified as Opt
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
 import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
 import Scripts.ModuleFiles (ModuleFilesOptions (..), runModuleFiles)
+import Scripts.Playground (runPlayground)
 import Scripts.PrintDeps (PrintDepsOptions (..), runPrintDeps)
 import Scripts.RequiredTargetFiles (RequiredTargetFilesOptions (..), runRequiredTargetFiles)
 
@@ -24,6 +25,7 @@ data Command
   | ModuleFiles ModuleFilesOptions
   | RequiredTargetFiles RequiredTargetFilesOptions
   | PrintDeps PrintDepsOptions
+  | Playground
 
 main :: IO ()
 main = Opt.execParser parserInfo >>= runCommand
@@ -41,6 +43,7 @@ runCommand cmd = case cmd of
   ModuleFiles opts -> runModuleFiles opts
   RequiredTargetFiles opts -> runRequiredTargetFiles opts
   PrintDeps opts -> runPrintDeps opts
+  Playground -> runPlayground
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -88,6 +91,7 @@ commandParser =
             (PrintDeps <$> printDepsOptionsParser)
             (Opt.progDesc "Print the modules imported by a Haskell source file")
         )
+      <> command "playground" Playground "Start the renamed AST playground in a browser"
       <> Opt.metavar "COMMAND"
  where
   command name cmd desc =

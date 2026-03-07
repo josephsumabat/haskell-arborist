@@ -85,6 +85,7 @@ library
       Scripts.DirCycles
       Scripts.DumpRenamedAst
       Scripts.ModuleFiles
+      Scripts.Playground
       Scripts.PrintDeps
       Scripts.RequiredTargetFiles
   other-modules:
@@ -143,6 +144,10 @@ library
     , tree-sitter-simple
     , unliftio
     , unordered-containers ==0.2.*
+    , http-types
+    , process
+    , wai
+    , warp
   default-language: GHC2021
   if impl(ghc >= 9.8.1)
     default-extensions:

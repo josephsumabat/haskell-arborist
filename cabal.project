@@ -8,15 +8,15 @@ packages:
     --../tree-sitter-simple/text-range
 
 source-repository-package
-     type: git
-     location: https://github.com/josephsumabat/tree-sitter-simple.git
-     tag: 3bb34da9809418deba54e5f82b52e60877f91cc6
-     subdir:
-       tree-sitter-simple
-       tree-sitter-haskell
-       tree-sitter-ast
-       haskell-ast
-       text-range
+    type: git
+    location: https://github.com/josephsumabat/tree-sitter-simple.git
+    tag: 3bb34da9809418deba54e5f82b52e60877f91cc6
+    subdir:
+      tree-sitter-simple
+      tree-sitter-haskell
+      tree-sitter-ast
+      haskell-ast
+      text-range
 
 source-repository-package
     type: git
