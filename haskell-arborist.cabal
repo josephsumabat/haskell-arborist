@@ -82,6 +82,7 @@ library
       Hir.Types
       Hir.Write.Types
       ModUtils
+      Scripts.CallGraph
       Scripts.DirCycles
       Scripts.DumpRenamedAst
       Scripts.ModuleFiles

@@ -6,6 +6,7 @@ import Data.Text qualified as T
 import Diagnostics.Fixes (DiagnosticsEnvironment (..), runAllFixes)
 import Options.Applicative (Parser, ParserInfo)
 import Options.Applicative qualified as Opt
+import Scripts.CallGraph (CallGraphOptions (..), runCallGraph)
 import Scripts.DirCycles (runDetectCycles, runRenameModule, runRenameModulePrefix)
 import Scripts.DumpRenamedAst (DumpRenamedAstOptions (..), runDumpRenamedAst)
 import Scripts.ModuleFiles (ModuleFilesOptions (..), runModuleFiles)
@@ -24,6 +25,7 @@ data Command
   | ModuleFiles ModuleFilesOptions
   | RequiredTargetFiles RequiredTargetFilesOptions
   | PrintDeps PrintDepsOptions
+  | CallGraph CallGraphOptions
 
 main :: IO ()
 main = Opt.execParser parserInfo >>= runCommand
@@ -41,6 +43,7 @@ runCommand cmd = case cmd of
   ModuleFiles opts -> runModuleFiles opts
   RequiredTargetFiles opts -> runRequiredTargetFiles opts
   PrintDeps opts -> runPrintDeps opts
+  CallGraph opts -> runCallGraph opts
 
 parserInfo :: ParserInfo Command
 parserInfo =
@@ -87,6 +90,12 @@ commandParser =
         ( Opt.info
             (PrintDeps <$> printDepsOptionsParser)
             (Opt.progDesc "Print the modules imported by a Haskell source file")
+        )
+      <> Opt.command
+        "call-graph"
+        ( Opt.info
+            (CallGraph <$> callGraphOptionsParser)
+            (Opt.progDesc "Emit a function-level call graph with resolved callee modules")
         )
       <> Opt.metavar "COMMAND"
  where
@@ -186,4 +195,43 @@ commandParser =
       <$> Opt.strArgument
         ( Opt.metavar "FILE"
             <> Opt.help "Path to the Haskell source file to analyze"
+        )
+
+  callGraphOptionsParser :: Parser CallGraphOptions
+  callGraphOptionsParser =
+    CallGraphOptions
+      <$> Opt.many
+        ( Opt.strArgument
+            ( Opt.metavar "FILE..."
+                <> Opt.help "Haskell source files to analyze"
+            )
+        )
+      <*> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "files-from"
+                <> Opt.metavar "FILE"
+                <> Opt.help "Read newline-delimited source paths from FILE (for large batches)"
+            )
+        )
+      <*> Opt.optional
+        ( Opt.strOption
+            ( Opt.long "output"
+                <> Opt.short 'o'
+                <> Opt.metavar "FILE"
+                <> Opt.help "Destination for the JSON graph (defaults to stdout)"
+            )
+        )
+      <*> Opt.strOption
+        ( Opt.long "config"
+            <> Opt.metavar "FILE"
+            <> Opt.help "Path to the Arborist configuration JSON"
+        )
+      <*> Opt.switch
+        ( Opt.long "include-types"
+            <> Opt.help "Also emit type-level reference edges"
+        )
+      <*> Opt.switch
+        ( Opt.long "quiet"
+            <> Opt.short 'q'
+            <> Opt.help "Suppress progress output on stderr"
         )
