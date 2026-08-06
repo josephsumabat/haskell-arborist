@@ -13,7 +13,7 @@ import AST qualified
 import AST.Haskell
 import Arborist.Config (allSourceRoots, loadArboristConfig)
 import Arborist.Files (buildModuleFileMap)
-import Arborist.ProgramIndex (ProgramIndex, gatherScopeDeps)
+import Arborist.ProgramIndex (ProgramIndex)
 import Arborist.Renamer (
   RenamePhase,
   ResolvedConstructor (..),
@@ -21,7 +21,7 @@ import Arborist.Renamer (
   ResolvedVariable (..),
   renamePrg,
  )
-import Arborist.Scope.Global (ExportIndex)
+import Arborist.Scope.Global (ExportIndex, getExportedDecls)
 import Arborist.Scope.Types (
   GlblConstructorInfo (..),
   GlblNameInfo (..),
@@ -29,7 +29,7 @@ import Arborist.Scope.Types (
   ResolvedVarInfo (..),
  )
 import Control.Applicative ((<|>))
-import Control.Monad (foldM)
+import Control.Monad (foldM, when)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString qualified as BS
@@ -45,6 +45,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import HaskellAnalyzer (parsePrg)
+import Hir.Read.Types qualified as Hir.Read
 import Hir.Types qualified as Hir
 import System.Directory qualified as Dir
 import System.FilePath (takeDirectory)
@@ -101,10 +102,24 @@ runCallGraph opts = do
     _ -> pure ()
 
   let total = length targets
-  progress opts $ "Analyzing " <> tshow total <> " files..."
+  progress opts $ "Parsing " <> tshow total <> " files..."
 
-  (_, results) <- foldM (analyzeFile opts modFileMap total) (Map.empty, []) (zip [1 ..] targets)
-  let (defs, edges) = mconcat (reverse results)
+  -- Phase 1: parse every target plus its transitive imports, visiting each
+  -- module exactly once.
+  (prgIndex, parsed) <- loadAll opts modFileMap targets
+
+  -- Phase 2: resolve each module's exports once. This is what makes a batch
+  -- viable: 'getExportedDecls' memoises re-export chains into the ExportIndex,
+  -- but 'renamePrg' does not hand the updated cache back, so a per-file loop
+  -- passing 'Map.empty' re-resolves the full export closure of every import for
+  -- every file. Warming it here makes that work O(modules) instead of
+  -- O(files x closure).
+  progress opts $ "Resolving exports for " <> tshow (Map.size prgIndex) <> " modules..."
+  let exportIndex = warmExportIndex prgIndex
+
+  progress opts "Renaming and extracting..."
+  let results = analyzeParsed prgIndex exportIndex <$> reverse parsed
+      (defs, edges) = mconcat results
       keptEdges
         | opts.includeTypes = edges
         | otherwise = filter ((== CallEdge) . (.kind)) edges
@@ -114,39 +129,76 @@ runCallGraph opts = do
 
   emit opts (encodeGraph defs keptEdges)
 
--- | Analyze one file, threading the program index so imported modules are
--- parsed once for the whole batch instead of once per file.
-analyzeFile ::
+-- | Resolve the exports of every indexed module, threading the memo cache.
+warmExportIndex :: ProgramIndex -> ExportIndex
+warmExportIndex prgIndex =
+  List.foldl'
+    (\idx modName -> snd (getExportedDecls prgIndex idx modName))
+    Map.empty
+    (Map.keys prgIndex)
+
+-- | Parse the targets and everything they transitively import.
+--
+-- A breadth-first sweep with a shared visited set, rather than
+-- 'gatherScopeDeps' per target. That function re-walks a file's whole import
+-- closure on every call even when each module is already cached, and in this
+-- repo almost any module's closure is ~10k modules -- so per-file calls cost
+-- O(files x closure) where this costs O(modules).
+loadAll ::
   CallGraphOptions ->
   Map.HashMap Hir.ModuleText FilePath ->
-  Int ->
-  (ProgramIndex, [([Def], [Edge])]) ->
-  (Int, FilePath) ->
-  IO (ProgramIndex, [([Def], [Edge])])
-analyzeFile opts modFileMap total (prgIndex, acc) (i, path) = do
-  progress opts $ "[" <> tshow i <> "/" <> tshow total <> "] " <> T.pack path
-  exists <- Dir.doesFileExist path
-  if not exists
-    then do
-      hPutStrLn stderr $ "warning: skipping missing file " <> path
-      pure (prgIndex, acc)
-    else do
-      contents <- TE.decodeUtf8 <$> BS.readFile path
-      let (_src, prg) = parsePrg contents
-      prgIndex' <- gatherScopeDeps prgIndex prg modFileMap Nothing
-      case prg.mod of
-        Nothing -> do
-          hPutStrLn stderr $ "warning: no module header in " <> path
-          pure (prgIndex', acc)
-        Just thisMod -> case renamePrg prgIndex' emptyExportIndex prg of
-          Nothing -> do
-            hPutStrLn stderr $ "warning: could not rename " <> path
-            pure (prgIndex', acc)
-          Just renamed ->
-            pure (prgIndex', walk thisMod.text Nothing Nothing (AST.getDynNode renamed) : acc)
+  [FilePath] ->
+  IO (ProgramIndex, [(Hir.ModuleText, Hir.Read.Program)])
+loadAll opts modFileMap targets = do
+  -- Targets are analyzed; their imports are only indexed for name resolution.
+  (index, analyzed) <- foldM readTarget (Map.empty, []) targets
+  index' <- sweep index (concatMap (imports . snd) analyzed)
+  pure (index', reverse analyzed)
  where
-  emptyExportIndex :: ExportIndex
-  emptyExportIndex = Map.empty
+  imports prg = (.mod) <$> Hir.getImports prg
+
+  readTarget (index, analyzed) path = do
+    exists <- Dir.doesFileExist path
+    if not exists
+      then do
+        hPutStrLn stderr $ "warning: skipping missing file " <> path
+        pure (index, analyzed)
+      else do
+        prg <- parseFile path
+        case prg.mod of
+          Nothing -> do
+            hPutStrLn stderr $ "warning: no module header in " <> path
+            pure (index, analyzed)
+          Just thisMod ->
+            pure (Map.insert thisMod prg index, (thisMod, prg) : analyzed)
+
+  sweep index [] = pure index
+  sweep index (modName : rest)
+    | Map.member modName index = sweep index rest
+    | otherwise = case Map.lookup modName modFileMap of
+        -- Not in any source root: a package dependency we cannot resolve.
+        Nothing -> sweep index rest
+        Just path -> do
+          prg <- parseFile path
+          when (Map.size index `mod` 2000 == 0) $
+            progress opts $
+              "  indexed " <> tshow (Map.size index) <> " modules..."
+          sweep (Map.insert modName prg index) (imports prg <> rest)
+
+  parseFile path = do
+    contents <- TE.decodeUtf8 <$> BS.readFile path
+    pure (snd (parsePrg contents))
+
+-- | Rename one already-parsed program and extract its definitions and edges.
+analyzeParsed ::
+  ProgramIndex ->
+  ExportIndex ->
+  (Hir.ModuleText, Hir.Read.Program) ->
+  ([Def], [Edge])
+analyzeParsed prgIndex exportIndex (thisMod, prg) =
+  case renamePrg prgIndex exportIndex prg of
+    Nothing -> ([], [])
+    Just renamed -> walk thisMod.text Nothing Nothing (AST.getDynNode renamed)
 
 -- | Walk the renamed tree, tracking the enclosing binding and instance head.
 --
